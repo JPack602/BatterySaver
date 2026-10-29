@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Battery Saver</string>
+    <string name="steps_complete">COMPLETED</string>
+    <string name="steps_ready">3 STEPS</string>
+    <string name="steps_progress">%1$d / 3</string>
+</resources>
