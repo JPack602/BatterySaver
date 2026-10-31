@@ -2,6 +2,10 @@
 <resources>
     <string name="app_name" translatable="false">CellBoost</string>
     <string name="overlay_permission_prompt">%1$s の「他のアプリの上に表示」を許可して戻ってください。</string>
+    <string name="overlay_consent_title">画面の表示に関するお願い</string>
+    <string name="overlay_consent_message">CellBoostでは、端末の設定画面を開いている間も進捗や完了を確認できるよう、設定画面の上にCellBoostの画面を表示します。\n\nこの機能を使うには、Androidの設定で「他のアプリの上に表示」を許可する必要があります。表示中の画面は、右上の「閉じる」から閉じられます。\n\nこの表示方法に同意して設定に進みますか？ あとで最適化を使うときに設定することもできます。</string>
+    <string name="overlay_consent_accept">同意して設定へ</string>
+    <string name="overlay_consent_later">あとで</string>
     <string name="optimize_action">最適化</string>
     <string name="optimize_again">再実行</string>
     <string name="complete_label">完了</string>

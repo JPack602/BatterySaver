@@ -1,6 +1,7 @@
 package jp.battery.saver;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -17,10 +18,13 @@ import android.widget.Toast;
 
 public final class MainActivity extends Activity {
     private static final int OVERLAY_PERMISSION_REQUEST = 100;
+    private static final String OVERLAY_CONSENT_SHOWN = "overlay_consent_shown";
     private OptimizationScreen screen;
+    private AlertDialog overlayConsentDialog;
     private String messageAfterResume;
     private OptimizationOverlayService overlayService;
     private boolean bound, resumed, launchPending, waitingForPermission, settingsLaunched;
+    private boolean overlayConsentPending, optimizeAfterPermission;
 
     private final ServiceConnection overlayConnection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -35,7 +39,14 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        if (state != null) waitingForPermission = state.getBoolean("waitingForPermission");
+        if (state != null) {
+            waitingForPermission = state.getBoolean("waitingForPermission");
+            overlayConsentPending = state.getBoolean("overlayConsentPending");
+            optimizeAfterPermission = state.getBoolean("optimizeAfterPermission");
+        } else {
+            overlayConsentPending = !Settings.canDrawOverlays(this)
+                    && !getPreferences(MODE_PRIVATE).getBoolean(OVERLAY_CONSENT_SHOWN, false);
+        }
         configureWindow();
         screen = new OptimizationScreen(this, null, this::requestOptimization, null);
         setContentView(screen.getView());
@@ -64,22 +75,60 @@ public final class MainActivity extends Activity {
     }
 
     private void requestOptimization() {
-        if (launchPending || waitingForPermission || settingsLaunched) return;
+        if (launchPending || waitingForPermission || settingsLaunched || overlayConsentPending) return;
         if (!Settings.canDrawOverlays(this)) {
-            waitingForPermission = true;
-            try {
-                Toast.makeText(this, getString(R.string.overlay_permission_prompt, getString(R.string.app_name)),
-                        Toast.LENGTH_LONG).show();
-                startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + getPackageName())), OVERLAY_PERMISSION_REQUEST);
-            } catch (ActivityNotFoundException | SecurityException error) {
-                waitingForPermission = false;
-                screen.showMessage(getString(R.string.overlay_permission_required));
-            }
+            optimizeAfterPermission = true;
+            overlayConsentPending = true;
+            showOverlayConsent();
             return;
         }
         launchPending = true;
         launchWhenReady();
+    }
+
+    private void showOverlayConsent() {
+        if (!resumed || !overlayConsentPending || overlayConsentDialog != null) return;
+        if (Settings.canDrawOverlays(this)) {
+            overlayConsentPending = false;
+            launchPending = optimizeAfterPermission;
+            optimizeAfterPermission = false;
+            launchWhenReady();
+            return;
+        }
+        getPreferences(MODE_PRIVATE).edit().putBoolean(OVERLAY_CONSENT_SHOWN, true).apply();
+        overlayConsentDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.overlay_consent_title)
+                .setMessage(R.string.overlay_consent_message)
+                .setPositiveButton(R.string.overlay_consent_accept, (dialog, which) -> {
+                    overlayConsentPending = false;
+                    openOverlayPermissionSettings();
+                })
+                .setNegativeButton(R.string.overlay_consent_later, (dialog, which) -> deferOverlayPermission())
+                .setOnCancelListener(dialog -> deferOverlayPermission())
+                .create();
+        overlayConsentDialog.setCanceledOnTouchOutside(false);
+        overlayConsentDialog.setOnDismissListener(dialog -> overlayConsentDialog = null);
+        overlayConsentDialog.show();
+    }
+
+    private void deferOverlayPermission() {
+        overlayConsentPending = false;
+        optimizeAfterPermission = false;
+    }
+
+    /** この設定画面は、説明ダイアログで明示的に同意した場合だけ開きます。 */
+    private void openOverlayPermissionSettings() {
+        waitingForPermission = true;
+        try {
+            Toast.makeText(this, getString(R.string.overlay_permission_prompt, getString(R.string.app_name)),
+                    Toast.LENGTH_LONG).show();
+            startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())), OVERLAY_PERMISSION_REQUEST);
+        } catch (ActivityNotFoundException | SecurityException error) {
+            waitingForPermission = false;
+            optimizeAfterPermission = false;
+            screen.showMessage(getString(R.string.overlay_permission_required));
+        }
     }
 
     private void launchWhenReady() {
@@ -116,8 +165,10 @@ public final class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != OVERLAY_PERMISSION_REQUEST) return;
         waitingForPermission = false;
-        launchPending = Settings.canDrawOverlays(this);
-        if (!launchPending) messageAfterResume = getString(R.string.overlay_permission_required);
+        boolean granted = Settings.canDrawOverlays(this);
+        launchPending = granted && optimizeAfterPermission;
+        optimizeAfterPermission = false;
+        if (!granted) messageAfterResume = getString(R.string.overlay_permission_required);
     }
 
     @Override protected void onStart() {
@@ -138,6 +189,7 @@ public final class MainActivity extends Activity {
             screen.showMessage(messageAfterResume);
             messageAfterResume = null;
         }
+        showOverlayConsent();
         launchWhenReady();
     }
 
@@ -153,10 +205,13 @@ public final class MainActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle out) {
         out.putBoolean("waitingForPermission", waitingForPermission);
+        out.putBoolean("overlayConsentPending", overlayConsentPending);
+        out.putBoolean("optimizeAfterPermission", optimizeAfterPermission);
         super.onSaveInstanceState(out);
     }
 
     @Override protected void onDestroy() {
+        if (overlayConsentDialog != null) overlayConsentDialog.dismiss();
         screen.release();
         if (bound) {
             unbindService(overlayConnection);
