@@ -2,7 +2,7 @@
 
 Javaで実装したAndroid向けバッテリー最適化アプリです。
 ネイビーとミントグリーンの画面に、円形の最適化ボタン、進捗リング、完了チェックを配置しています。
-icon/lightning-svgrepo-com.svgをAndroid用VectorDrawableに変換し、黒背景の中央に配置したアプリアイコンを使用しています。アプリ内のブランドアイコンにも同じSVGを使用しています。
+icon/lightning-svgrepo-com.svgをAndroid用VectorDrawableに変換し、黒背景の中央に配置したアプリアイコンを使用しています。雷は従来より17%小さくし、中央を軸に右へ16度傾けています。アプリ内のブランドアイコンにも同じ調整を適用しています。
 
 ## Android Studioで開く
 
@@ -40,13 +40,22 @@ APKは開発用署名です。配布用の署名はAndroid Studioの「Generate 
 Settings > Build, Execution, Deployment > Build Tools > Gradle のGradle user homeを
 このフォルダー内の `.gradle-home` に指定してください。
 
+## 診断モード
+
+バッテリー情報カードの下に「診断モード」カードを表示します。
+「クイックスキャン（主な項目を短時間で確認）」と「フルスキャン（すべての項目を詳しく確認）」を
+ラジオボタンで選択できます。初期値はクイックスキャンで、選択はすぐに保存し、再起動後も維持します。
+実行中と結果表示のオーバーレイでは選択を変更できません。画面回転でも実行時の選択を復元します。
+選択値は `OptimizationEngine.performOptimization(Context context, int master_clear, int scanMode)` へ渡します。
+`SCAN_QUICK` / `SCAN_FULL` で処理を分岐できます。モード別の診断処理は未実装で、現在の演出時間は共通です。
+
 ## 設定と最適化時間
 
 右上の歯車ボタンから設定ポップアップを開き、最適化時間とマスタークリアの値をまとめて設定できます。
 「master_clear = 1 / マスタークリアの値は1です」「master_clear = 0 / マスタークリアの値は0です」の
 ラジオボタンで選択し、「保存」を押すと `OptimizationScreen.master_clear_selected` に `0` または `1` を格納します。
 初期値は `1` です。既に保存されている値がある場合は、その値を維持します。
-選択値は `OptimizationEngine.performOptimization(Context context, int master_clear)` へ渡します。
+選択値は `OptimizationEngine.performOptimization(Context context, int master_clear, int scanMode)` へ渡します。
 後から実処理を追加するときは、このメソッド内の `master_clear` を参照してください。現時点では処理内容は変わりません。
 
 設定ポップアップの「最適化時間」で、100%に到達するまでの時間を1〜3600秒で設定できます（初期値8秒）。
@@ -59,7 +68,7 @@ Settings > Build, Execution, Deployment > Build Tools > Gradle のGradle user ho
 Androidのアニメーション倍率設定によって指定秒数を短縮することはありません。
 最適化中は「この画面を閉じないでください」を16spの明るい文字で表示し、画面の自動消灯を抑制します。
 案内文に背景や枠は付けません。
-縦画面ではバッテリーカードと最適化ボタンを一定の間隔で並べ、余った高さは画面全体の上下の余白に配分します。
+縦画面ではバッテリー情報・診断モード・最適化ボタンを上から一定の間隔で並べ、高さが不足する場合はスクロールできます。
 実処理を後から追加して長時間実行する場合は、従来どおり100%の状態で実処理の終了を待ちます。
 
 ## 実際の最適化処理を追加する
@@ -68,7 +77,7 @@ Androidのアニメーション倍率設定によって指定秒数を短縮す�
 
 `app/src/main/java/jp/battery/saver/OptimizationEngine.java`
 
-`performOptimization(Context context, int master_clear)` の `TODO` コメントの位置にコードを追加してください。
+`performOptimization(Context context, int master_clear, int scanMode)` の `TODO` コメントの位置にコードを追加してください。
 日本語で実行順序、スレッド、権限、エラー処理の注意を記載しています。
 
 呼び出し順序は、中央ボタン → 設定画面起動 → オーバーレイ内の指定秒数の進捗アニメーション → `performOptimization()` → 完了画面です。

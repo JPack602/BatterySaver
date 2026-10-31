@@ -92,10 +92,15 @@ public final class MainActivity extends Activity {
         try {
             overlayService.prepareOverlay();
             settingsLaunched = true;
+
             // 【起動箇所】android.settings.SETTINGS を起動します。
             // startActivity の復帰は相手 Activity の初回描画完了を意味しません。
             // ここでActivity起動するためのコードを書く
             startActivity(new Intent(Settings.ACTION_SETTINGS));
+
+            // 選択した master_clear を出力
+            // Toast.makeText(OptimizationScreen.master_clear_selected).show();
+
             // 【表示箇所】遅延・post・Service 起動待ちを挟まず、直後に addView します。
             overlayService.showPreparedOverlay();
         } catch (ActivityNotFoundException | IllegalStateException | SecurityException |

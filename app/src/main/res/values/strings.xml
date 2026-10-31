@@ -23,6 +23,12 @@
     <string name="battery_level">バッテリー残量</string>
     <string name="battery_temperature">温度</string>
     <string name="battery_health">状態</string>
+    <string name="battery_health_good" translatable="false">Good</string>
+    <string name="diagnosis_mode">診断モード</string>
+    <string name="scan_quick">クイックスキャン</string>
+    <string name="scan_quick_description">主な項目を短時間で確認</string>
+    <string name="scan_full">フルスキャン</string>
+    <string name="scan_full_description">すべての項目を詳しく確認</string>
     <string name="battery_charging">充電中</string>
     <string name="battery_full">充電完了</string>
     <string name="last_run">前回の実行：%1$s</string>

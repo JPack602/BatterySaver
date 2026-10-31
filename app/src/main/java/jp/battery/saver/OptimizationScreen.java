@@ -18,6 +18,10 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
@@ -53,6 +57,9 @@ final class OptimizationScreen extends ContextThemeWrapper {
     private OptimizationOrbView orb;
     private TextView batteryText, batteryCaption, temperatureText, healthText;
     private TextView messageText, lastRunText;
+    private RadioGroup scanChoices;
+    private RadioButton quickScanOption, fullScanOption;
+    private int scanMode = OptimizationEngine.SCAN_QUICK;
     private final View[] batterySegments = new View[20];
     private int mode = OptimizationOrbView.READY;
     // 設定で選択した 0 または 1 を実処理へ渡します。初期値は 1 です。
@@ -94,6 +101,8 @@ final class OptimizationScreen extends ContextThemeWrapper {
             animationDuration = Math.max(1000, Math.min(MAX_DURATION_SECONDS * 1000L,
                     state.getLong("duration", animationDuration)));
             master_clear_selected = state.getInt("master_clear", master_clear_selected) == 0 ? 0 : 1;
+            scanMode = state.getInt("scan_mode", scanMode) == OptimizationEngine.SCAN_FULL
+                    ? OptimizationEngine.SCAN_FULL : OptimizationEngine.SCAN_QUICK;
             progressSeed = state.getLong("progressSeed", progressSeed);
         }
         progress = new OptimizationProgress(animationDuration, progressSeed);
@@ -141,11 +150,11 @@ final class OptimizationScreen extends ContextThemeWrapper {
         outer.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         scroll.addView(outer, new ScrollView.LayoutParams(-1, -2));
         LinearLayout content = column();
-        content.setGravity(Gravity.CENTER_VERTICAL);
+        content.setGravity(landscape ? Gravity.CENTER_VERTICAL : Gravity.TOP);
         content.setPadding(dp(24), dp(landscape ? 12 : compactPortrait ? 16 : 24),
                 dp(24), dp(landscape ? 12 : compactPortrait ? 16 : 24));
         outer.addView(content, new LinearLayout.LayoutParams(-1, -2));
-        // 余った高さはまとまり全体の上下へ配分し、文字拡大時はスクロールできます。
+        // 縦画面は上からカードを配置し、文字拡大時や高さ不足ではスクロールできます。
         scroll.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             int availableHeight = bottom - top;
             if (content.getMinimumHeight() != availableHeight) content.setMinimumHeight(availableHeight);
@@ -192,7 +201,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         }
         add(content, header, 0);
 
-        // カードと主操作を一定の間隔でまとめ、空き高さで両者を引き離さないようにします。
+        // バッテリー情報・診断モード・主操作の順に、一定の間隔で並べます。
         LinearLayout dashboard = landscape ? row() : column();
         LinearLayout overview = column();
         LinearLayout hero = column();
@@ -206,11 +215,11 @@ final class OptimizationScreen extends ContextThemeWrapper {
         } else {
             dashboard.addView(overview, new LinearLayout.LayoutParams(-1, -2));
             LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, -2);
-            heroLp.topMargin = dp(compactPortrait ? 16 : 24);
+            heroLp.topMargin = dp(compactPortrait ? 20 : 24);
             dashboard.addView(hero, heroLp);
         }
         LinearLayout.LayoutParams dashboardLp = new LinearLayout.LayoutParams(-1, -2);
-        dashboardLp.topMargin = dp(landscape ? 12 : compactPortrait ? 20 : 24);
+        dashboardLp.topMargin = dp(landscape ? 12 : compactPortrait ? 12 : 16);
         content.addView(dashboard, dashboardLp);
 
         LinearLayout batteryCard = column();
@@ -256,7 +265,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         temperatureText = text("— °C", 20, TEXT, true);
         temp.addView(temperatureText);
         LinearLayout health = metric(getString(R.string.battery_health));
-        healthText = text("—", 20, TEXT, true);
+        healthText = text("—", 20, TEXT, false);
         health.addView(healthText);
         LinearLayout.LayoutParams metricLp = new LinearLayout.LayoutParams(0, -2, 1);
         metricLp.rightMargin = dp(6);
@@ -266,6 +275,31 @@ final class OptimizationScreen extends ContextThemeWrapper {
         details.addView(health, healthLp);
         add(batteryCard, details, 16);
         add(overview, batteryCard, 0);
+
+        LinearLayout diagnosisCard = column();
+        diagnosisCard.setPadding(dp(20), dp(16), dp(20), dp(12));
+        diagnosisCard.setBackground(shape(SURFACE, 22, 0xFF23343B));
+        TextView diagnosisTitle = text(getString(R.string.diagnosis_mode), 14, TEXT, true);
+        if (android.os.Build.VERSION.SDK_INT >= 28) diagnosisTitle.setAccessibilityHeading(true);
+        diagnosisCard.addView(diagnosisTitle);
+        scanChoices = new RadioGroup(this);
+        scanChoices.setOrientation(LinearLayout.VERTICAL);
+        quickScanOption = scanOption(R.string.scan_quick, R.string.scan_quick_description);
+        fullScanOption = scanOption(R.string.scan_full, R.string.scan_full_description);
+        scanChoices.addView(quickScanOption, new RadioGroup.LayoutParams(-1, -2));
+        scanChoices.addView(fullScanOption, new RadioGroup.LayoutParams(-1, -2));
+        scanChoices.check(scanMode == OptimizationEngine.SCAN_FULL
+                ? fullScanOption.getId() : quickScanOption.getId());
+        scanChoices.setOnCheckedChangeListener((group, checkedId) -> {
+            if (mode == OptimizationOrbView.RUNNING || closeRequest != null) return;
+            int selected = checkedId == fullScanOption.getId()
+                    ? OptimizationEngine.SCAN_FULL : OptimizationEngine.SCAN_QUICK;
+            if (scanMode == selected) return;
+            scanMode = selected;
+            preferences.edit().putInt("scan_mode", scanMode).apply();
+        });
+        add(diagnosisCard, scanChoices, 8);
+        add(overview, diagnosisCard, 20);
 
         orb = new OptimizationOrbView(this);
         orb.setRepeatEnabled(optimizationRequest != null);
@@ -280,7 +314,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         messageText.setLineSpacing(dp(4), 1);
         messageText.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         messageText.setVisibility(View.GONE);
-        add(hero, messageText, 16);
+        add(hero, messageText, 0);
         lastRunText = text("", 12, MUTED, false);
         lastRunText.setGravity(Gravity.CENTER);
         add(hero, lastRunText, 12);
@@ -296,8 +330,36 @@ final class OptimizationScreen extends ContextThemeWrapper {
         return card;
     }
 
+    private RadioButton scanOption(int titleRes, int descriptionRes) {
+        String title = getString(titleRes);
+        String description = getString(descriptionRes);
+        SpannableString label = new SpannableString(title + "\n" + description);
+        int descriptionStart = title.length() + 1;
+        label.setSpan(new RelativeSizeSpan(12f / 15f), descriptionStart, label.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        label.setSpan(new ForegroundColorSpan(MUTED), descriptionStart, label.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        RadioButton option = new RadioButton(this);
+        option.setId(View.generateViewId());
+        option.setText(label);
+        option.setTextSize(15);
+        option.setTextColor(TEXT);
+        option.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        option.setIncludeFontPadding(false);
+        option.setGravity(Gravity.CENTER_VERTICAL);
+        option.setLineSpacing(dp(3), 1);
+        option.setMinHeight(dp(64));
+        option.setPadding(dp(2), dp(8), dp(4), dp(8));
+        option.setButtonTintList(new ColorStateList(new int[][]{
+                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{MINT, MUTED}));
+        option.setBackground(ripple(SURFACE, 12));
+        return option;
+    }
+
     private void loadOptions() {
         master_clear_selected = preferences.getInt("master_clear", 1) == 0 ? 0 : 1;
+        scanMode = preferences.getInt("scan_mode", OptimizationEngine.SCAN_QUICK) == OptimizationEngine.SCAN_FULL
+                ? OptimizationEngine.SCAN_FULL : OptimizationEngine.SCAN_QUICK;
         int seconds = Math.max(1, Math.min(MAX_DURATION_SECONDS,
                 preferences.getInt("optimization_duration_seconds", DEFAULT_DURATION_SECONDS)));
         animationDuration = seconds * 1000L;
@@ -419,6 +481,12 @@ final class OptimizationScreen extends ContextThemeWrapper {
     private void renderState() {
         boolean running = mode == OptimizationOrbView.RUNNING;
         rootView.setKeepScreenOn(running);
+        scanChoices.check(scanMode == OptimizationEngine.SCAN_FULL
+                ? fullScanOption.getId() : quickScanOption.getId());
+        boolean canChooseScan = !running && closeRequest == null;
+        quickScanOption.setEnabled(canChooseScan);
+        fullScanOption.setEnabled(canChooseScan);
+        scanChoices.setAlpha(canChooseScan ? 1f : .65f);
         messageText.setVisibility(running ? View.VISIBLE : View.GONE);
         if (running) messageText.setText(R.string.keep_screen_open);
         orb.setState(mode, mode == OptimizationOrbView.COMPLETE ? 1 : 0);
@@ -441,10 +509,12 @@ final class OptimizationScreen extends ContextThemeWrapper {
     /** 演出の終点。実処理は OptimizationEngine.performOptimization() に追加してください。 */
     private void runOptimizationAfterAnimation() {
         if (optimizationJob != null) return;
+        final int selectedScanMode = scanMode;
+        final int selectedMasterClear = master_clear_selected;
         optimizationJob = executor.submit(() -> {
             try {
                 // 【接続箇所】演出100% → 実処理 → 正常終了 → 完了画面 の順序です。
-                OptimizationEngine.performOptimization(getApplicationContext(), master_clear_selected);
+                OptimizationEngine.performOptimization(getApplicationContext(), selectedMasterClear, selectedScanMode);
                 main.post(() -> {
                     if (destroyed) return;
                     optimizationJob = null;
@@ -489,7 +559,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         int health = intent.getIntExtra(BatteryManager.EXTRA_HEALTH, BatteryManager.BATTERY_HEALTH_UNKNOWN);
         String healthLabel;
         switch (health) {
-            case BatteryManager.BATTERY_HEALTH_GOOD: healthLabel = "良好"; break;
+            case BatteryManager.BATTERY_HEALTH_GOOD: healthLabel = getString(R.string.battery_health_good); break;
             case BatteryManager.BATTERY_HEALTH_OVERHEAT: healthLabel = "高温"; break;
             case BatteryManager.BATTERY_HEALTH_COLD: healthLabel = "低温"; break;
             case BatteryManager.BATTERY_HEALTH_DEAD: healthLabel = "要確認"; break;
@@ -524,6 +594,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         out.putLong("startedAt", startedAt);
         out.putLong("duration", animationDuration);
         out.putInt("master_clear", master_clear_selected);
+        out.putInt("scan_mode", scanMode);
         out.putLong("progressSeed", progressSeed);
     }
 
