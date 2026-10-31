@@ -32,6 +32,7 @@ public final class OptimizationOrbView extends View {
     private float progress;
     private boolean pressed;
     private boolean foreground;
+    private boolean repeatEnabled = true;
     private long completeAt;
     private final Typeface medium = Typeface.create("sans-serif-medium", Typeface.NORMAL);
 
@@ -44,12 +45,16 @@ public final class OptimizationOrbView extends View {
         setContentDescription("最適化する。ダブルタップして開始");
     }
 
+    public void setRepeatEnabled(boolean value) {
+        repeatEnabled = value;
+    }
+
     public void setState(int next, float value) {
         boolean changed = mode != next;
         if (changed && next == COMPLETE) completeAt = SystemClock.uptimeMillis();
         mode = next;
         progress = Math.max(0, Math.min(1, value));
-        setClickable(mode != RUNNING);
+        setClickable(mode == READY || (mode == COMPLETE && repeatEnabled));
         if (changed) {
             setContentDescription(mode == RUNNING ? "バッテリーを最適化しています" :
                     mode == COMPLETE ? "最適化完了。もう一度最適化する" : "最適化する");
@@ -69,7 +74,7 @@ public final class OptimizationOrbView extends View {
     @Override public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
         super.onInitializeAccessibilityNodeInfo(info);
         info.setClassName("android.widget.Button");
-        info.setEnabled(mode != RUNNING);
+        info.setEnabled(isClickable());
         if (mode == RUNNING) {
             info.setRangeInfo(AccessibilityNodeInfo.RangeInfo.obtain(
                     AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT, 0, 100, progress * 100));
@@ -77,11 +82,11 @@ public final class OptimizationOrbView extends View {
     }
 
     @Override public boolean performClick() {
-        return mode != RUNNING && super.performClick();
+        return isClickable() && super.performClick();
     }
 
     @Override public boolean onTouchEvent(MotionEvent event) {
-        if (mode == RUNNING) return false;
+        if (!isClickable()) return false;
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
             float dx = event.getX() - getWidth() / 2f;
             float dy = event.getY() - getHeight() / 2f;
@@ -190,7 +195,7 @@ public final class OptimizationOrbView extends View {
             canvas.drawPath(path, paint);
             canvas.restore();
             drawText(canvas, "最適化完了", 0, 27, 19, 0xFFE7FFF4, medium);
-            drawText(canvas, "もう一度実行", 0, 53, 11, 0xFFA5C7BA, Typeface.DEFAULT);
+            drawText(canvas, repeatEnabled ? "もう一度実行" : "閉じると設定に戻ります", 0, 53, 11, 0xFFA5C7BA, Typeface.DEFAULT);
         } else if (mode == RUNNING) {
             drawText(canvas, String.valueOf(Math.round(progress * 100)), -4, 4, 49, 0xFFE7FFF4,
                     Typeface.create("sans-serif-light", Typeface.NORMAL));
