@@ -2,7 +2,7 @@
 
 Javaで実装したAndroid向けバッテリー最適化アプリです。
 ネイビーとミントグリーンの画面に、円形の最適化ボタン、進捗リング、完了チェックを配置しています。
-lightning-svgrepo-com.svgをAndroid用VectorDrawableに変換し、黒背景の中央に配置したアプリアイコンを使用しています。アプリ内のブランドアイコンにも同じSVGを使用しています。
+icon/lightning-svgrepo-com.svgをAndroid用VectorDrawableに変換し、黒背景の中央に配置したアプリアイコンを使用しています。アプリ内のブランドアイコンにも同じSVGを使用しています。
 
 ## Android Studioで開く
 
@@ -17,14 +17,22 @@ lightning-svgrepo-com.svgをAndroid用VectorDrawableに変換し、黒背景の�
 - Java 17、外部UIライブラリ不要
 - `local.properties` は現在のPCにインストールされているSDKを参照しています。
 
+## ダブルクリックでビルド
+
+エクスプローラーでプロジェクト直下の `build.bat` をダブルクリックしてください。
+APKビルドとAndroid Lintを実行し、`outputs\CellBoost.apk` を作成します。
+完了後は成功・失敗とAPKの保存先を表示して停止します。何かキーを押すとウィンドウを閉じます。
+コマンドから停止せずに実行する場合は `build.bat --no-pause` を使用できます。
+
 ## PowerShellでビルド
 
 ```powershell
 .\build.ps1
 ```
 
-APKビルドとAndroid Lintを実行し、`outputs\BatterySaver.apk` を作成します。
+APKビルドとAndroid Lintを実行し、`outputs\CellBoost.apk` を作成します。
 接続した端末へインストールして起動する場合は ` .\build.ps1 -Install ` を使用できます。
+GradleやAndroid Studioから直接ビルドする場合も、生成されるAPK名は CellBoost.apk です（例: app/build/outputs/apk/debug/CellBoost.apk）。
 APKは開発用署名です。配布用の署名はAndroid Studioの「Generate Signed App Bundle / APK」で設定してください。
 
 ビルド用キャッシュは `.gradle-home`、開発用署名は `.android`、作業ログは `work` に保存します。
@@ -32,16 +40,38 @@ APKは開発用署名です。配布用の署名はAndroid Studioの「Generate 
 Settings > Build, Execution, Deployment > Build Tools > Gradle のGradle user homeを
 このフォルダー内の `.gradle-home` に指定してください。
 
+## 設定と最適化時間
+
+右上の歯車ボタンから設定ポップアップを開き、最適化時間とマスタークリアの値をまとめて設定できます。
+「master_clear = 1 / マスタークリアの値は1です」「master_clear = 0 / マスタークリアの値は0です」の
+ラジオボタンで選択し、「保存」を押すと `OptimizationScreen.master_clear_selected` に `0` または `1` を格納します。
+初期値は `1` です。既に保存されている値がある場合は、その値を維持します。
+選択値は `OptimizationEngine.performOptimization(Context context, int master_clear)` へ渡します。
+後から実処理を追加するときは、このメソッド内の `master_clear` を参照してください。現時点では処理内容は変わりません。
+
+設定ポップアップの「最適化時間」で、100%に到達するまでの時間を1〜3600秒で設定できます（初期値8秒）。
+マスタークリアと秒数は「保存」で反映され、アプリの再起動後も維持されます。「キャンセル」では変更しません。
+最適化を開始する直前に現在の設定をオーバーレイへ反映します。
+
+進捗は実行ごとに乱数で生成した24区間のカーブに沿って、速度を変えながら単調に増加します。
+指定時間の経過前は最大99%とし、指定時間を経過した最初の描画更新で100%になります。
+画面回転では開始時刻・秒数・乱数シード・マスタークリアの選択値を復元し、同じ進捗を継続します。
+Androidのアニメーション倍率設定によって指定秒数を短縮することはありません。
+最適化中は「この画面を閉じないでください」を16spの明るい文字で表示し、画面の自動消灯を抑制します。
+案内文に背景や枠は付けません。
+縦画面ではバッテリーカードと最適化ボタンを一定の間隔で並べ、余った高さは画面全体の上下の余白に配分します。
+実処理を後から追加して長時間実行する場合は、従来どおり100%の状態で実処理の終了を待ちます。
+
 ## 実際の最適化処理を追加する
 
 **編集する場所:**
 
 `app/src/main/java/jp/battery/saver/OptimizationEngine.java`
 
-`performOptimization(Context context)` の `TODO` コメントの位置にコードを追加してください。
+`performOptimization(Context context, int master_clear)` の `TODO` コメントの位置にコードを追加してください。
 日本語で実行順序、スレッド、権限、エラー処理の注意を記載しています。
 
-呼び出し順序は、中央ボタン → 設定画面起動 → オーバーレイ内の約7.2秒の進捗アニメーション → `performOptimization()` → 完了画面です。
+呼び出し順序は、中央ボタン → 設定画面起動 → オーバーレイ内の指定秒数の進捗アニメーション → `performOptimization()` → 完了画面です。
 実処理の実行中は100%の状態で待機し、正常終了後に完了表示へ進みます。
 例外が発生した場合は再試行できる状態へ戻ります。
 バックグラウンドスレッドで呼び出すため、Viewの更新や権限ダイアログの表示を直接行わないでください。
@@ -50,14 +80,24 @@ Settings > Build, Execution, Deployment > Build Tools > Gradle のGradle user ho
 画面側の接続箇所は `OptimizationScreen.java` の `runOptimizationAfterAnimation()` です。
 このメソッドにも検索しやすい日本語コメントを残しています。
 
+## アイコン素材
+
+- `icon/CellBoost.svg`: 黒背景と中央の雷を含む完成版
+- `icon/CellBoost.png`: 完成版の1024 x 1024 PNG
+- `icon/lightning-svgrepo-com.svg`: 指定された元の雷SVG
+- `icon/phone-battery-with-full-charge-and-a-bolt-symbol-svgrepo-com.svg`: 以前のアイコン素材
+
+Androidで使用するVectorDrawableは `app/src/main/res/drawable` に配置しています。
+
 ## 主なファイル
 
 - MainActivity.java: オーバーレイ権限取得、設定画面の起動、Serviceへの事前接続
 - OptimizationOverlayService.java: オーバーレイの追加・削除と画面回転への対応
 - OptimizationScreen.java: 通常画面とオーバーレイで共有する画面・バッテリー情報・最適化演出
-- `OptimizationOrbView.java`: 中央ボタン、進捗リング、光のアニメーション、完了チェック
+- `OptimizationOrbView.java`: 中央ボタン、進捗リング、完了チェック
+- `OptimizationProgress.java`: 指定時間で100%になるランダムな進捗カーブ
 - `OptimizationEngine.java`: 演出後に実行する処理の追加先
-- `res/drawable/ic_battery_brand.xml`: lightning-svgrepo-com.svgから変換したブランドアイコン
+- `res/drawable/ic_battery_brand.xml`: icon/lightning-svgrepo-com.svgから変換したブランドアイコン
 
 バッテリー残量・温度・状態はAndroidから取得します。
 再起動後も最後に最適化が完了した日時を表示します。
@@ -65,9 +105,9 @@ Settings > Build, Execution, Deployment > Build Tools > Gradle のGradle user ho
 
 ## 設定起動とオーバーレイの確認
 
-「最適化する」を押すと、Settings.ACTION_SETTINGS（android.settings.SETTINGS）を起動し、
+「最適化」を押すと、Settings.ACTION_SETTINGS（android.settings.SETTINGS）を起動し、
 startActivity() の直後に TYPE_APPLICATION_OVERLAY の全画面ウィンドウを追加します。
-既存の約7.2秒の演出・OptimizationEngine・完了画面は、このオーバーレイ内で動きます。
+指定秒数の演出・OptimizationEngine・完了画面は、このオーバーレイ内で動きます。
 オーバーレイ右上の「閉じる」で下の設定画面を表示できます。
 戻る操作でアプリに戻った場合もオーバーレイを削除し、再度実行できます。
 

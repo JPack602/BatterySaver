@@ -28,3 +28,11 @@ android {
     }
     lint { abortOnError true }
 }
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.outputs.each { output ->
+            output.outputFileName.set('CellBoost.apk')
+        }
+    }
+}

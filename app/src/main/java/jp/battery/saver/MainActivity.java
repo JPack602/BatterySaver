@@ -42,7 +42,7 @@ public final class MainActivity extends Activity {
         // Service と View の生成を設定起動前に済ませ、測定対象の区間から除きます。
         bound = bindService(new Intent(this, OptimizationOverlayService.class),
                 overlayConnection, Context.BIND_AUTO_CREATE);
-        if (!bound) screen.showMessage("オーバーレイの準備に失敗しました。アプリを開き直してください。");
+        if (!bound) screen.showMessage(getString(R.string.preparation_failed));
     }
 
     private void configureWindow() {
@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
                         Uri.parse("package:" + getPackageName())), OVERLAY_PERMISSION_REQUEST);
             } catch (ActivityNotFoundException | SecurityException error) {
                 waitingForPermission = false;
-                screen.showMessage("他のアプリの上に表示する権限を、端末の設定から許可してください。");
+                screen.showMessage(getString(R.string.overlay_permission_required));
             }
             return;
         }
@@ -86,7 +86,7 @@ public final class MainActivity extends Activity {
         if (!resumed || !launchPending || overlayService == null) return;
         launchPending = false;
         if (!Settings.canDrawOverlays(this)) {
-            screen.showMessage("他のアプリの上に表示する権限が必要です。");
+            screen.showMessage(getString(R.string.overlay_permission_required));
             return;
         }
         try {
@@ -102,9 +102,8 @@ public final class MainActivity extends Activity {
                  WindowManager.BadTokenException | WindowManager.InvalidDisplayException error) {
             settingsLaunched = false;
             overlayService.hideOverlay();
-            screen.showMessage("設定画面またはオーバーレイを表示できませんでした。権限と端末の設定を確認してください。");
-            Toast.makeText(this, "設定画面またはオーバーレイを表示できませんでした。",
-                    Toast.LENGTH_LONG).show();
+            screen.showMessage(getString(R.string.overlay_failed));
+            Toast.makeText(this, R.string.overlay_failed, Toast.LENGTH_LONG).show();
         }
     }
 
@@ -113,7 +112,7 @@ public final class MainActivity extends Activity {
         if (requestCode != OVERLAY_PERMISSION_REQUEST) return;
         waitingForPermission = false;
         launchPending = Settings.canDrawOverlays(this);
-        if (!launchPending) messageAfterResume = "表示権限が許可されていません。「最適化する」から再試行できます。";
+        if (!launchPending) messageAfterResume = getString(R.string.overlay_permission_required);
     }
 
     @Override protected void onStart() {

@@ -13,6 +13,8 @@ public final class OptimizationEngine {
      *
      * ・バックグラウンドスレッドで実行されます。ここで View を操作しないでください。
      * ・context は Application Context です。Activity を保持しないでください。
+     * ・master_clear は設定で選んだ 0 または 1 です（初期値 1）。
+     *   OptimizationScreen.master_clear_selected の値を開始時に読み込み、ここへ渡します。
      * ・必要な実処理を下の TODO の位置に追加してください。
      * ・失敗した場合は例外を投げてください。画面側が再試行できる状態に戻します。
      * ・画面終了時は割り込みが入ります。長い処理では割り込みを確認してください。
@@ -20,7 +22,7 @@ public final class OptimizationEngine {
      *   Androidで許可されているAPIのみを使用し、設定画面の起動が必要な操作は
      *   Activity側に実装してください。
      */
-    public static void performOptimization(Context context) throws Exception {
+    public static void performOptimization(Context context, int master_clear) throws Exception {
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedException("Optimization cancelled");
         }

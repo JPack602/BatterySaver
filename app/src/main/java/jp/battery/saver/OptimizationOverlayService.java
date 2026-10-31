@@ -45,8 +45,8 @@ public final class OptimizationOverlayService extends Service {
     void prepareOverlay() {
         if (screen == null) {
             screen = new OptimizationScreen(windowContext, null, null, this::hideOverlay);
-            screen.prepareOptimization();
         }
+        screen.prepareOptimization();
     }
 
     void showPreparedOverlay() {
