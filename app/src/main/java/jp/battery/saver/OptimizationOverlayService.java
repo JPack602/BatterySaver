@@ -22,6 +22,7 @@ public final class OptimizationOverlayService extends Service {
     private WindowManager windowManager;
     private OptimizationScreen screen;
     private boolean attached;
+    private Runnable overlayStateListener;
 
     final class LocalBinder extends Binder {
         OptimizationOverlayService getService() { return OptimizationOverlayService.this; }
@@ -42,6 +43,17 @@ public final class OptimizationOverlayService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return binder; }
 
+    boolean isOverlayShowing() { return attached; }
+
+    void setOverlayStateListener(Runnable listener) {
+        overlayStateListener = listener;
+        notifyOverlayStateChanged();
+    }
+
+    private void notifyOverlayStateChanged() {
+        if (overlayStateListener != null) overlayStateListener.run();
+    }
+
     void prepareOverlay() {
         if (screen == null) {
             screen = new OptimizationScreen(windowContext, null, null, this::hideOverlay);
@@ -59,6 +71,7 @@ public final class OptimizationOverlayService extends Service {
         windowManager.addView(screen.getView(), overlayParameters());
         attached = true;
         screen.startPreparedOptimization();
+        notifyOverlayStateChanged();
     }
 
     private WindowManager.LayoutParams overlayParameters() {
@@ -88,6 +101,7 @@ public final class OptimizationOverlayService extends Service {
         }
         screen.release();
         screen = null;
+        notifyOverlayStateChanged();
     }
 
     @Override public void onConfigurationChanged(Configuration newConfig) {
@@ -102,6 +116,7 @@ public final class OptimizationOverlayService extends Service {
             windowManager.addView(screen.getView(), overlayParameters());
             attached = true;
             screen.startUpdates();
+            notifyOverlayStateChanged();
         }
     }
 

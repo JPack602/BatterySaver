@@ -11,6 +11,7 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.SweepGradient;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
 import android.view.MotionEvent;
 import android.view.View;
@@ -22,6 +23,7 @@ public final class OptimizationOrbView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF bounds = new RectF();
     private final Path path = new Path();
+    private final Drawable optimizationBolt;
     private final int mint = Color.rgb(114, 232, 189);
     private final Shader halo = new RadialGradient(0, 0, 149,
             new int[]{0x2865E3B0, 0x1265E3B0, 0x0065E3B0}, new float[]{0, .62f, 1}, Shader.TileMode.CLAMP);
@@ -38,6 +40,9 @@ public final class OptimizationOrbView extends View {
 
     public OptimizationOrbView(Context context) {
         super(context);
+        optimizationBolt = context.getDrawable(R.drawable.ic_optimization_bolt);
+        optimizationBolt.setTint(mint);
+        optimizationBolt.setBounds(-24, -24, 24, 24);
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         setClickable(true);
         setFocusable(true);
@@ -177,10 +182,7 @@ public final class OptimizationOrbView extends View {
         } else {
             canvas.save();
             canvas.translate(0, -26);
-            paint.setColor(mint);
-            path.reset(); path.moveTo(4, -24); path.lineTo(-17, 4); path.lineTo(-2, 4);
-            path.lineTo(-6, 24); path.lineTo(18, -6); path.lineTo(3, -6); path.close();
-            canvas.drawPath(path, paint);
+            optimizationBolt.draw(canvas);
             canvas.restore();
             drawText(canvas, getContext().getString(R.string.optimize_action), 0, 42, 20, 0xFFE7FFF4, medium);
         }

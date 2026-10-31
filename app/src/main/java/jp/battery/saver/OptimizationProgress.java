@@ -22,6 +22,11 @@ final class OptimizationProgress {
         checkpoints[SEGMENTS] = 1f;
     }
 
+    long remainingSeconds(long elapsedMillis) {
+        long remainingMillis = durationMillis - Math.max(0, Math.min(durationMillis, elapsedMillis));
+        return remainingMillis / 1000 + (remainingMillis % 1000 == 0 ? 0 : 1);
+    }
+
     float at(long elapsedMillis) {
         if (elapsedMillis <= 0) return 0f;
         if (elapsedMillis >= durationMillis) return 1f;

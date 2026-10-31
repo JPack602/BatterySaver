@@ -56,7 +56,8 @@ final class OptimizationScreen extends ContextThemeWrapper {
     private Future<?> optimizationJob;
     private OptimizationOrbView orb;
     private TextView batteryText, batteryCaption, temperatureText, healthText;
-    private TextView messageText, lastRunText;
+    private TextView remainingTimeText, messageText, lastRunText;
+    private long displayedRemainingMinutes = -1;
     private RadioGroup scanChoices;
     private RadioButton quickScanOption, fullScanOption;
     private int scanMode = OptimizationEngine.SCAN_QUICK;
@@ -81,7 +82,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
             if (destroyed || mode != OptimizationOrbView.RUNNING) return;
             long elapsed = SystemClock.elapsedRealtime() - startedAt;
             float fraction = progress.at(elapsed);
-            renderProgress(fraction);
+            renderProgress(fraction, elapsed);
             if (elapsed >= animationDuration) runOptimizationAfterAnimation();
             else if (foreground) main.postDelayed(this, Math.min(33, animationDuration - elapsed));
         }
@@ -306,8 +307,16 @@ final class OptimizationScreen extends ContextThemeWrapper {
         orb.setId(View.generateViewId());
         if (optimizationRequest != null) orb.setOnClickListener(v -> optimizationRequest.run());
         int orbSize = dp(landscape ? 220 : compactPortrait ? 216 : 280);
+        FrameLayout progressArea = new FrameLayout(this);
         LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(-1, orbSize);
-        hero.addView(orb, orbLp);
+        hero.addView(progressArea, orbLp);
+        progressArea.addView(orb, new FrameLayout.LayoutParams(-1, -1));
+        remainingTimeText = text("", 16, MINT, true);
+        remainingTimeText.setGravity(Gravity.CENTER);
+        remainingTimeText.setPadding(dp(14), 0, dp(14), 0);
+        remainingTimeText.setTranslationY(orbSize * .2f);
+        remainingTimeText.setVisibility(View.GONE);
+        progressArea.addView(remainingTimeText, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
         messageText = text("", 16, TEXT, true);
         messageText.setGravity(Gravity.CENTER);
         messageText.setPadding(dp(14), 0, dp(14), 0);
@@ -463,12 +472,12 @@ final class OptimizationScreen extends ContextThemeWrapper {
     /** 設定起動の前に初期表示を準備。ここではアニメーションを開始しません。 */
     void prepareOptimization() {
         mode = OptimizationOrbView.RUNNING;
+        startedAt = 0;
         // 起動時に準備したオーバーレイにも、直前の選択・秒数を反映します。
         loadOptions();
         progressSeed = ThreadLocalRandom.current().nextLong();
         progress = new OptimizationProgress(animationDuration, progressSeed);
         renderState();
-        renderProgress(0);
     }
 
     /** WindowManager.addView() の直後に既存の最適化演出を開始します。 */
@@ -489,7 +498,13 @@ final class OptimizationScreen extends ContextThemeWrapper {
         scanChoices.setAlpha(canChooseScan ? 1f : .65f);
         messageText.setVisibility(running ? View.VISIBLE : View.GONE);
         if (running) messageText.setText(R.string.keep_screen_open);
-        orb.setState(mode, mode == OptimizationOrbView.COMPLETE ? 1 : 0);
+        remainingTimeText.setVisibility(running ? View.VISIBLE : View.GONE);
+        if (running) {
+            long elapsed = startedAt == 0 ? 0 : SystemClock.elapsedRealtime() - startedAt;
+            renderProgress(progress.at(elapsed), elapsed);
+        } else {
+            orb.setState(mode, mode == OptimizationOrbView.COMPLETE ? 1 : 0);
+        }
         if (closeRequest != null && mode != OptimizationOrbView.RUNNING) {
             orb.setClickable(false);
             orb.setFocusable(false);
@@ -502,8 +517,16 @@ final class OptimizationScreen extends ContextThemeWrapper {
                 DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.JAPAN).format(new Date(lastRun))));
     }
 
-    private void renderProgress(float fraction) {
+    private void renderProgress(float fraction, long elapsedMillis) {
         orb.setState(OptimizationOrbView.RUNNING, fraction);
+        long minutes = (progress.remainingSeconds(elapsedMillis) + 59) / 60;
+        if (minutes == displayedRemainingMinutes) return;
+        displayedRemainingMinutes = minutes;
+        if (minutes == 0) {
+            remainingTimeText.setText(R.string.scan_finishing);
+        } else {
+            remainingTimeText.setText(getString(R.string.scan_remaining_minutes, minutes));
+        }
     }
 
     /** 演出の終点。実処理は OptimizationEngine.performOptimization() に追加してください。 */
