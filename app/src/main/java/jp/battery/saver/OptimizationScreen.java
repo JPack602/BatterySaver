@@ -21,7 +21,6 @@ import android.text.InputType;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.RelativeSizeSpan;
-import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
@@ -47,8 +46,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 final class OptimizationScreen extends ContextThemeWrapper {
-    private static final int BG = 0xFF0B1419, SURFACE = 0xFF142128;
-    private static final int TEXT = 0xFFF1F7F5, MUTED = 0xFF8EA6A4, MINT = 0xFF72E8BD;
+    private AppAppearance.Palette colors;
     private static final int DEFAULT_DURATION_SECONDS = 8;
     private static final int MAX_DURATION_SECONDS = 3600;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -56,7 +54,11 @@ final class OptimizationScreen extends ContextThemeWrapper {
     private Future<?> optimizationJob;
     private OptimizationOrbView orb;
     private TextView batteryText, batteryCaption, temperatureText, healthText;
-    private TextView messageText, lastRunText;
+    private TextView remainingTimeText, messageText, lastRunText;
+    private TextView screenTitle, progressTitle, progressDescription;
+    private LinearLayout scanPanel, progressPanel;
+    private Button startButton, resultButton;
+    private long displayedRemainingMinutes = -1;
     private RadioGroup scanChoices;
     private RadioButton quickScanOption, fullScanOption;
     private int scanMode = OptimizationEngine.SCAN_QUICK;
@@ -70,6 +72,11 @@ final class OptimizationScreen extends ContextThemeWrapper {
     private boolean registered, foreground, destroyed;
     private SharedPreferences preferences;
     private View rootView;
+    private ScrollView screenScroll;
+    private Intent lastBatteryIntent;
+    private final SharedPreferences.OnSharedPreferenceChangeListener appearanceListener = (prefs, key) -> {
+        if (AppAppearance.DARK_MODE.equals(key) && !destroyed) refreshAppearance();
+    };
     private final Runnable optimizationRequest, closeRequest;
 
     private final BroadcastReceiver batteryReceiver = new BroadcastReceiver() {
@@ -81,17 +88,18 @@ final class OptimizationScreen extends ContextThemeWrapper {
             if (destroyed || mode != OptimizationOrbView.RUNNING) return;
             long elapsed = SystemClock.elapsedRealtime() - startedAt;
             float fraction = progress.at(elapsed);
-            renderProgress(fraction);
+            renderProgress(fraction, elapsed);
             if (elapsed >= animationDuration) runOptimizationAfterAnimation();
             else if (foreground) main.postDelayed(this, Math.min(33, animationDuration - elapsed));
         }
     };
 
     OptimizationScreen(Context context, Bundle state, Runnable optimizationRequest, Runnable closeRequest) {
-        super(context, R.style.AppTheme);
+        super(context, AppAppearance.theme(context));
+        colors = AppAppearance.palette(context);
         this.optimizationRequest = optimizationRequest;
         this.closeRequest = closeRequest;
-        preferences = getSharedPreferences("battery_saver", MODE_PRIVATE);
+        preferences = AppAppearance.preferences(this);
         lastRun = preferences.getLong("last_optimization", 0);
         loadOptions();
         progressSeed = ThreadLocalRandom.current().nextLong();
@@ -108,6 +116,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         progress = new OptimizationProgress(animationDuration, progressSeed);
         buildScreen();
         renderState();
+        preferences.registerOnSharedPreferenceChangeListener(appearanceListener);
     }
 
     View getView() { return rootView; }
@@ -122,12 +131,30 @@ final class OptimizationScreen extends ContextThemeWrapper {
         renderState();
     }
 
+    private void refreshAppearance() {
+        colors = AppAppearance.palette(this);
+        setTheme(AppAppearance.theme(this));
+        int scrollY = screenScroll.getScrollY();
+        CharSequence message = messageText.getText();
+        boolean messageVisible = messageText.getVisibility() == View.VISIBLE;
+        // ルートと実行状態を維持し、進捗・実処理を再開始せずに表示だけを更新します。
+        buildScreen();
+        displayedRemainingMinutes = -1;
+        renderState();
+        updateBattery(lastBatteryIntent);
+        if (mode != OptimizationOrbView.RUNNING && messageVisible) showMessage(message.toString());
+        ScrollView restoredScroll = screenScroll;
+        restoredScroll.post(() -> restoredScroll.scrollTo(0, scrollY));
+    }
+
     private void buildScreen() {
         android.util.DisplayMetrics display = getResources().getDisplayMetrics();
-        boolean landscape = display.widthPixels > display.heightPixels;
-        boolean compactPortrait = !landscape && display.heightPixels / display.density < 760;
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(BG);
+        boolean landscape = display.widthPixels / display.density >= 640;
+        FrameLayout root = rootView == null ? new FrameLayout(this) : (FrameLayout) rootView;
+        root.removeAllViews();
+        // オーバーレイのシステムバーは背後の設定画面に従うため、
+        // 安全領域の背景だけは端末のライト／ダーク設定に合わせます。
+        root.setBackgroundColor(closeRequest == null ? colors.background : AppAppearance.systemBarBackground(this));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int left, top, right, bottom;
             if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -142,26 +169,20 @@ final class OptimizationScreen extends ContextThemeWrapper {
             return insets;
         });
         ScrollView scroll = new ScrollView(this);
+        screenScroll = scroll;
+        scroll.setBackgroundColor(colors.background);
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
         root.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout outer = new LinearLayout(this);
+        LinearLayout outer = column();
         outer.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         scroll.addView(outer, new ScrollView.LayoutParams(-1, -2));
         LinearLayout content = column();
-        content.setGravity(landscape ? Gravity.CENTER_VERTICAL : Gravity.TOP);
-        content.setPadding(dp(24), dp(landscape ? 12 : compactPortrait ? 16 : 24),
-                dp(24), dp(landscape ? 12 : compactPortrait ? 16 : 24));
+        content.setPadding(dp(20), dp(landscape ? 8 : 12), dp(20), dp(landscape ? 12 : 24));
         outer.addView(content, new LinearLayout.LayoutParams(-1, -2));
-        // 縦画面は上からカードを配置し、文字拡大時や高さ不足ではスクロールできます。
-        scroll.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-            int availableHeight = bottom - top;
-            if (content.getMinimumHeight() != availableHeight) content.setMinimumHeight(availableHeight);
-        });
-        // ノッチ・ナビゲーション領域を除いた実際の横幅に合わせます。
         outer.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-            int available = Math.min(right - left, dp(landscape ? 920 : 520));
+            int available = Math.min(right - left, dp(landscape ? 1000 : 560));
             if (available > 0 && content.getLayoutParams().width != available) {
                 android.view.ViewGroup.LayoutParams params = content.getLayoutParams();
                 params.width = available;
@@ -173,186 +194,244 @@ final class OptimizationScreen extends ContextThemeWrapper {
         header.setGravity(Gravity.CENTER_VERTICAL);
         ImageView brand = new ImageView(this);
         brand.setImageResource(R.drawable.ic_battery_brand);
-        brand.setBackground(shape(Color.BLACK, 14, 0));
-        brand.setPadding(dp(7), dp(7), dp(7), dp(7));
+        brand.setBackground(shape(Color.BLACK, 10, 0));
+        brand.setPadding(dp(5), dp(5), dp(5), dp(5));
         brand.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        header.addView(brand, lp(42, 42));
-        TextView brandText = text(getString(R.string.app_name), 20, TEXT, true);
+        header.addView(brand, lp(32, 32));
+        TextView brandText = text(getString(R.string.app_name), 19, colors.text, true);
         LinearLayout.LayoutParams brandLp = new LinearLayout.LayoutParams(0, -2, 1);
-        brandLp.leftMargin = dp(12);
+        brandLp.leftMargin = dp(10);
         header.addView(brandText, brandLp);
+        ImageButton appearance = new ImageButton(this);
+        appearance.setImageResource(colors.dark ? R.drawable.ic_sun : R.drawable.ic_moon);
+        appearance.setImageTintList(ColorStateList.valueOf(colors.text));
+        appearance.setPadding(dp(13), dp(13), dp(13), dp(13));
+        appearance.setBackground(ripple(colors.background, 24));
+        String appearanceAction = getString(colors.dark ? R.string.switch_to_light_mode : R.string.switch_to_dark_mode);
+        appearance.setContentDescription(appearanceAction);
+        appearance.setTooltipText(appearanceAction);
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            appearance.setStateDescription(getString(colors.dark ? R.string.dark_mode : R.string.light_mode));
+        }
+        appearance.setOnClickListener(v -> AppAppearance.toggle(this));
+        header.addView(appearance, lp(48, 48));
         if (closeRequest == null) {
             ImageButton settings = new ImageButton(this);
             settings.setImageResource(R.drawable.ic_settings);
-            settings.setImageTintList(ColorStateList.valueOf(MINT));
-            settings.setPadding(dp(12), dp(12), dp(12), dp(12));
-            settings.setBackground(ripple(SURFACE, 16));
+            settings.setImageTintList(ColorStateList.valueOf(colors.text));
+            settings.setPadding(dp(13), dp(13), dp(13), dp(13));
+            settings.setBackground(ripple(colors.background, 24));
             settings.setContentDescription(getString(R.string.settings_action));
             settings.setOnClickListener(v -> showSettingsDialog());
             header.addView(settings, lp(48, 48));
         } else {
-            TextView close = text(getString(R.string.close_action), 13, MINT, true);
-            close.setGravity(Gravity.CENTER);
-            close.setBackground(ripple(SURFACE, 18));
-            close.setFocusable(true);
+            Button close = actionButton(getString(R.string.close_action), colors.softGreen, colors.accent);
             close.setContentDescription(getString(R.string.close_description));
             close.setOnClickListener(v -> closeRequest.run());
-            header.addView(close, lp(64, 48));
+            header.addView(close, new LinearLayout.LayoutParams(-2, -2));
         }
         add(content, header, 0);
+        screenTitle = text(getString(R.string.battery_title), 28, colors.text, true);
+        screenTitle.setVisibility(landscape ? View.GONE : View.VISIBLE);
+        if (android.os.Build.VERSION.SDK_INT >= 28) screenTitle.setAccessibilityHeading(true);
+        add(content, screenTitle, 20);
 
-        // バッテリー情報・診断モード・主操作の順に、一定の間隔で並べます。
         LinearLayout dashboard = landscape ? row() : column();
+        dashboard.setGravity(Gravity.TOP);
         LinearLayout overview = column();
-        LinearLayout hero = column();
-        hero.setGravity(Gravity.CENTER);
+        LinearLayout actions = column();
         if (landscape) {
-            dashboard.setGravity(Gravity.CENTER_VERTICAL);
             LinearLayout.LayoutParams overviewLp = new LinearLayout.LayoutParams(0, -2, 1);
-            overviewLp.rightMargin = dp(16);
+            overviewLp.rightMargin = dp(24);
             dashboard.addView(overview, overviewLp);
-            dashboard.addView(hero, new LinearLayout.LayoutParams(0, -2, 1));
+            dashboard.addView(actions, new LinearLayout.LayoutParams(0, -2, 1));
         } else {
             dashboard.addView(overview, new LinearLayout.LayoutParams(-1, -2));
-            LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, -2);
-            heroLp.topMargin = dp(compactPortrait ? 20 : 24);
-            dashboard.addView(hero, heroLp);
+            LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, -2);
+            actionsLp.topMargin = dp(28);
+            dashboard.addView(actions, actionsLp);
         }
-        LinearLayout.LayoutParams dashboardLp = new LinearLayout.LayoutParams(-1, -2);
-        dashboardLp.topMargin = dp(landscape ? 12 : compactPortrait ? 12 : 16);
-        content.addView(dashboard, dashboardLp);
+        add(content, dashboard, landscape ? 12 : 20);
 
         LinearLayout batteryCard = column();
-        batteryCard.setPadding(dp(20), dp(20), dp(20), dp(20));
-        batteryCard.setBackground(shape(SURFACE, 22, 0xFF23343B));
+        batteryCard.setPadding(dp(landscape ? 20 : 24), dp(landscape ? 18 : 22),
+                dp(landscape ? 20 : 24), dp(landscape ? 18 : 22));
+        batteryCard.setBackground(shape(colors.surface, 22, colors.border));
         LinearLayout batteryTop = row();
         batteryTop.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout batteryLeft = column();
-        batteryLeft.addView(text(getString(R.string.battery_level), 12, MUTED, false));
-        batteryText = text("— %", 42, TEXT, true);
-        batteryText.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        batteryText.setPadding(0, dp(6), 0, 0);
-        batteryLeft.addView(batteryText);
-        batteryTop.addView(batteryLeft, new LinearLayout.LayoutParams(0, -2, 1));
-        batteryCaption = text("", 12, MINT, false);
-        batteryCaption.setVisibility(View.GONE);
+        TextView batteryLabel = text(getString(R.string.battery_level), 14, colors.muted, false);
+        batteryTop.addView(batteryLabel, new LinearLayout.LayoutParams(0, -2, 1));
+        batteryCaption = text("", 12, colors.accent, true);
         batteryCaption.setGravity(Gravity.CENTER);
-        batteryCaption.setPadding(dp(12), dp(7), dp(12), dp(7));
-        batteryCaption.setBackground(shape(0xFF203B32, 16, 0));
+        batteryCaption.setPadding(dp(10), dp(6), dp(10), dp(6));
+        batteryCaption.setBackground(shape(colors.softGreen, 20, 0));
         batteryTop.addView(batteryCaption);
         batteryCard.addView(batteryTop);
+        batteryText = text("— %", 68, colors.text, true);
+        batteryText.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        batteryText.setMaxLines(1);
+        batteryText.setAutoSizeTextTypeUniformWithConfiguration(32, landscape ? 48 : 68, 1,
+                android.util.TypedValue.COMPLEX_UNIT_SP);
+        add(batteryCard, batteryText, landscape ? 6 : 12);
         LinearLayout segments = row();
+        segments.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         for (int i = 0; i < batterySegments.length; i++) {
             View segment = new View(this);
-            segment.setBackground(shape(0xFF263B3D, 3, 0));
-            LinearLayout.LayoutParams segmentLp = new LinearLayout.LayoutParams(0, dp(5), 1);
-            if (i > 0) segmentLp.leftMargin = dp(4);
+            segment.setBackground(shape(colors.border, 2, 0));
+            LinearLayout.LayoutParams segmentLp = new LinearLayout.LayoutParams(0, dp(8), 1);
+            if (i > 0) segmentLp.leftMargin = dp(3);
             segments.addView(segment, segmentLp);
             batterySegments[i] = segment;
         }
-        LinearLayout.LayoutParams segmentsLp = new LinearLayout.LayoutParams(-1, -2);
-        segmentsLp.topMargin = dp(12);
-        batteryCard.addView(segments, segmentsLp);
-
-        View divider = new View(this);
-        divider.setBackgroundColor(0xFF293B42);
+        add(batteryCard, segments, landscape ? 10 : 14);
         LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(-1, dp(1));
-        dividerLp.topMargin = dp(20);
-        batteryCard.addView(divider, dividerLp);
-
+        dividerLp.topMargin = dp(landscape ? 14 : 24);
+        batteryCard.addView(divider(), dividerLp);
         LinearLayout details = row();
         LinearLayout temp = metric(getString(R.string.battery_temperature));
-        temperatureText = text("— °C", 20, TEXT, true);
+        temperatureText = text("— °C", 21, colors.text, true);
         temp.addView(temperatureText);
         LinearLayout health = metric(getString(R.string.battery_health));
-        healthText = text("—", 20, TEXT, false);
+        healthText = text("—", 21, colors.text, true);
         health.addView(healthText);
-        LinearLayout.LayoutParams metricLp = new LinearLayout.LayoutParams(0, -2, 1);
-        metricLp.rightMargin = dp(6);
-        details.addView(temp, metricLp);
-        LinearLayout.LayoutParams healthLp = new LinearLayout.LayoutParams(0, -2, 1);
-        healthLp.leftMargin = dp(6);
-        details.addView(health, healthLp);
-        add(batteryCard, details, 16);
-        add(overview, batteryCard, 0);
+        LinearLayout.LayoutParams tempLp = new LinearLayout.LayoutParams(0, -2, 1);
+        tempLp.rightMargin = dp(12);
+        details.addView(temp, tempLp);
+        details.addView(health, new LinearLayout.LayoutParams(0, -2, 1));
+        add(batteryCard, details, landscape ? 12 : 20);
+        overview.addView(batteryCard, new LinearLayout.LayoutParams(-1, -2));
 
-        LinearLayout diagnosisCard = column();
-        diagnosisCard.setPadding(dp(20), dp(16), dp(20), dp(12));
-        diagnosisCard.setBackground(shape(SURFACE, 22, 0xFF23343B));
-        TextView diagnosisTitle = text(getString(R.string.diagnosis_mode), 14, TEXT, true);
-        if (android.os.Build.VERSION.SDK_INT >= 28) diagnosisTitle.setAccessibilityHeading(true);
-        diagnosisCard.addView(diagnosisTitle);
+        scanPanel = column();
+        TextView scanHeading = text(getString(R.string.scan_heading), 20, colors.text, true);
+        if (android.os.Build.VERSION.SDK_INT >= 28) scanHeading.setAccessibilityHeading(true);
+        scanPanel.addView(scanHeading);
+        TextView modeLabel = text(getString(R.string.diagnosis_mode), 13, colors.muted, false);
+        add(scanPanel, modeLabel, landscape ? 8 : 16);
         scanChoices = new RadioGroup(this);
         scanChoices.setOrientation(LinearLayout.VERTICAL);
-        quickScanOption = scanOption(R.string.scan_quick, R.string.scan_quick_description);
-        fullScanOption = scanOption(R.string.scan_full, R.string.scan_full_description);
+        scanChoices.setPadding(dp(4), dp(4), dp(4), dp(4));
+        scanChoices.setBackground(shape(colors.surface, 18, colors.border));
+        quickScanOption = scanOption(R.string.scan_quick, landscape);
+        fullScanOption = scanOption(R.string.scan_full, landscape);
         scanChoices.addView(quickScanOption, new RadioGroup.LayoutParams(-1, -2));
-        scanChoices.addView(fullScanOption, new RadioGroup.LayoutParams(-1, -2));
+        RadioGroup.LayoutParams fullLp = new RadioGroup.LayoutParams(-1, -2);
+        fullLp.topMargin = dp(4);
+        scanChoices.addView(fullScanOption, fullLp);
         scanChoices.check(scanMode == OptimizationEngine.SCAN_FULL
                 ? fullScanOption.getId() : quickScanOption.getId());
         scanChoices.setOnCheckedChangeListener((group, checkedId) -> {
             if (mode == OptimizationOrbView.RUNNING || closeRequest != null) return;
-            int selected = checkedId == fullScanOption.getId()
+            scanMode = checkedId == fullScanOption.getId()
                     ? OptimizationEngine.SCAN_FULL : OptimizationEngine.SCAN_QUICK;
-            if (scanMode == selected) return;
-            scanMode = selected;
+            updateScanSelection();
             preferences.edit().putInt("scan_mode", scanMode).apply();
         });
-        add(diagnosisCard, scanChoices, 8);
-        add(overview, diagnosisCard, 20);
+        add(scanPanel, scanChoices, 10);
+        updateScanSelection();
+        TextView scanHelp = text(getString(R.string.scan_help), 13, colors.muted, false);
+        scanHelp.setLineSpacing(dp(3), 1);
+        add(scanPanel, scanHelp, landscape ? 10 : 14);
+        startButton = actionButton(getString(R.string.optimize_action), colors.accent, colors.onAccent);
+        startButton.setOnClickListener(v -> {
+            if (optimizationRequest != null) optimizationRequest.run();
+        });
+        LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, -2);
+        startLp.topMargin = dp(landscape ? 12 : 20);
+        scanPanel.addView(startButton, startLp);
+        lastRunText = text("", 12, colors.muted, false);
+        lastRunText.setGravity(Gravity.CENTER);
+        lastRunText.setLineSpacing(dp(3), 1);
+        add(scanPanel, lastRunText, landscape ? 10 : 14);
+        actions.addView(scanPanel, new LinearLayout.LayoutParams(-1, -2));
 
+        progressPanel = column();
+        progressPanel.setGravity(Gravity.CENTER_HORIZONTAL);
+        progressPanel.setPadding(dp(20), dp(20), dp(20), dp(24));
+        progressPanel.setBackground(shape(colors.surface, 22, colors.border));
+        progressTitle = text("", 20, colors.text, true);
+        progressTitle.setGravity(Gravity.CENTER);
+        progressTitle.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        progressPanel.addView(progressTitle);
         orb = new OptimizationOrbView(this);
-        orb.setRepeatEnabled(optimizationRequest != null);
+        orb.setRepeatEnabled(false);
         orb.setId(View.generateViewId());
-        if (optimizationRequest != null) orb.setOnClickListener(v -> optimizationRequest.run());
-        int orbSize = dp(landscape ? 220 : compactPortrait ? 216 : 280);
-        LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(-1, orbSize);
-        hero.addView(orb, orbLp);
-        messageText = text("", 16, TEXT, true);
+        progressPanel.addView(orb, new LinearLayout.LayoutParams(-1, dp(landscape ? 160 : 200)));
+        remainingTimeText = text("", 14, colors.accent, true);
+        remainingTimeText.setGravity(Gravity.CENTER);
+        add(progressPanel, remainingTimeText, 0);
+        progressDescription = text(getString(R.string.scan_complete_description), 14, colors.muted, false);
+        progressDescription.setGravity(Gravity.CENTER);
+        progressDescription.setLineSpacing(dp(4), 1);
+        add(progressPanel, progressDescription, 8);
+        resultButton = actionButton(getString(R.string.return_to_home), colors.accent, colors.onAccent);
+        resultButton.setOnClickListener(v -> {
+            if (closeRequest != null) closeRequest.run();
+        });
+        LinearLayout.LayoutParams resultLp = new LinearLayout.LayoutParams(-1, -2);
+        resultLp.topMargin = dp(20);
+        progressPanel.addView(resultButton, resultLp);
+        actions.addView(progressPanel, new LinearLayout.LayoutParams(-1, -2));
+
+        messageText = text("", 16, colors.text, false);
         messageText.setGravity(Gravity.CENTER);
-        messageText.setPadding(dp(14), 0, dp(14), 0);
-        messageText.setLineSpacing(dp(4), 1);
+        messageText.setLineSpacing(dp(5), 1);
         messageText.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         messageText.setVisibility(View.GONE);
-        add(hero, messageText, 0);
-        lastRunText = text("", 12, MUTED, false);
-        lastRunText.setGravity(Gravity.CENTER);
-        add(hero, lastRunText, 12);
+        add(actions, messageText, 16);
         rootView = root;
         root.requestApplyInsets();
     }
 
+    private View divider() {
+        View line = new View(this);
+        line.setBackgroundColor(colors.border);
+        line.setMinimumHeight(dp(1));
+        return line;
+    }
+
+    private Button actionButton(String label, int background, int foregroundColor) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(15);
+        button.setTextColor(foregroundColor);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setAllCaps(false);
+        button.setMinHeight(dp(56));
+        button.setMinimumHeight(dp(56));
+        button.setPadding(dp(20), dp(14), dp(20), dp(14));
+        button.setBackground(ripple(background, 14));
+        button.setStateListAnimator(null);
+        return button;
+    }
+
+    private void updateScanSelection() {
+        boolean quick = scanMode == OptimizationEngine.SCAN_QUICK;
+        quickScanOption.setBackground(ripple(quick ? colors.softGreen : colors.surface, 14));
+        fullScanOption.setBackground(ripple(quick ? colors.surface : colors.softGreen, 14));
+        quickScanOption.setTypeface(Typeface.create(quick ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
+        fullScanOption.setTypeface(Typeface.create(quick ? "sans-serif" : "sans-serif-medium", Typeface.NORMAL));
+    }
+
     private LinearLayout metric(String label) {
         LinearLayout card = column();
-        TextView caption = text(label, 12, MUTED, false);
+        TextView caption = text(label, 12, colors.muted, false);
         caption.setPadding(0, 0, 0, dp(6));
         card.addView(caption);
         return card;
     }
 
-    private RadioButton scanOption(int titleRes, int descriptionRes) {
-        String title = getString(titleRes);
-        String description = getString(descriptionRes);
-        SpannableString label = new SpannableString(title + "\n" + description);
-        int descriptionStart = title.length() + 1;
-        label.setSpan(new RelativeSizeSpan(12f / 15f), descriptionStart, label.length(),
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        label.setSpan(new ForegroundColorSpan(MUTED), descriptionStart, label.length(),
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    private RadioButton scanOption(int titleRes, boolean compact) {
         RadioButton option = new RadioButton(this);
         option.setId(View.generateViewId());
-        option.setText(label);
+        option.setText(titleRes);
         option.setTextSize(15);
-        option.setTextColor(TEXT);
-        option.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        option.setTextColor(colors.text);
         option.setIncludeFontPadding(false);
         option.setGravity(Gravity.CENTER_VERTICAL);
-        option.setLineSpacing(dp(3), 1);
-        option.setMinHeight(dp(64));
-        option.setPadding(dp(2), dp(8), dp(4), dp(8));
+        option.setMinHeight(dp(compact ? 48 : 56));
+        option.setPadding(dp(12), dp(compact ? 8 : 12), dp(12), dp(compact ? 8 : 12));
         option.setButtonTintList(new ColorStateList(new int[][]{
-                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{MINT, MUTED}));
-        option.setBackground(ripple(SURFACE, 12));
+                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{colors.accent, colors.muted}));
         return option;
     }
 
@@ -370,10 +449,10 @@ final class OptimizationScreen extends ContextThemeWrapper {
         option.setId(View.generateViewId());
         option.setText(label);
         option.setTextSize(14);
-        option.setTextColor(TEXT);
+        option.setTextColor(colors.text);
         option.setButtonTintList(new ColorStateList(new int[][]{
-                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{MINT, MUTED}));
-        option.setMinHeight(dp(64));
+                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{colors.accent, colors.muted}));
+        option.setMinHeight(dp(48));
         option.setLineSpacing(dp(4), 1);
         option.setPadding(0, dp(8), dp(4), dp(8));
         return option;
@@ -386,24 +465,46 @@ final class OptimizationScreen extends ContextThemeWrapper {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout panel = column();
         panel.setPadding(dp(24), dp(24), dp(24), dp(20));
-        panel.setBackground(shape(SURFACE, 24, 0xFF2B4548));
-        panel.addView(text(getString(R.string.settings_action), 20, TEXT, true));
-        add(panel, text(getString(R.string.optimization_duration), 14, TEXT, true), 24);
-        TextView durationHelp = text(getString(R.string.duration_help), 13, MUTED, false);
+        panel.setBackground(shape(colors.surface, 24, colors.border));
+        panel.addView(text(getString(R.string.settings_action), 20, colors.text, true));
+        add(panel, text(getString(R.string.optimization_duration), 14, colors.text, true), 24);
+        TextView durationHelp = text(getString(R.string.duration_help), 13, colors.muted, false);
         durationHelp.setLineSpacing(dp(4), 1);
         add(panel, durationHelp, 8);
         EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
         input.setSingleLine(true);
-        input.setTextColor(TEXT);
+        input.setTextColor(colors.text);
         input.setTextSize(24);
-        input.setBackgroundTintList(ColorStateList.valueOf(MINT));
+        input.setMinHeight(dp(56));
+        input.setBackgroundTintList(ColorStateList.valueOf(colors.accent));
         input.setContentDescription(getString(R.string.duration_input));
         input.setText(String.valueOf(animationDuration / 1000));
         input.selectAll();
-        add(panel, input, 12);
-        add(panel, text(getString(R.string.master_clear_label), 14, TEXT, true), 24);
+        LinearLayout durationRow = row();
+        durationRow.setGravity(Gravity.CENTER_VERTICAL);
+        durationRow.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView secondsUnit = text(getString(R.string.seconds_unit), 15, colors.muted, false);
+        secondsUnit.setPadding(dp(12), 0, 0, 0);
+        durationRow.addView(secondsUnit);
+        add(panel, durationRow, 12);
+        Button advancedToggle = actionButton(getString(R.string.advanced_settings), colors.surface, colors.accent);
+        advancedToggle.setTextSize(14);
+        advancedToggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        advancedToggle.setPadding(0, dp(12), 0, dp(12));
+        advancedToggle.setMinHeight(dp(48));
+        advancedToggle.setBackground(ripple(colors.surface, 10));
+        advancedToggle.setFocusable(true);
+        add(panel, advancedToggle, 16);
+        LinearLayout advanced = column();
+        advanced.setVisibility(View.GONE);
+        advancedToggle.setOnClickListener(view -> {
+            boolean expanded = advanced.getVisibility() == View.VISIBLE;
+            advanced.setVisibility(expanded ? View.GONE : View.VISIBLE);
+            advancedToggle.setText(expanded ? R.string.advanced_settings : R.string.advanced_settings_open);
+        });
+        advanced.addView(text(getString(R.string.master_clear_label), 14, colors.text, true));
         RadioGroup choices = new RadioGroup(this);
         choices.setOrientation(LinearLayout.VERTICAL);
         RadioButton one = masterClearOption(R.string.master_clear_one);
@@ -411,20 +512,29 @@ final class OptimizationScreen extends ContextThemeWrapper {
         choices.addView(one, new RadioGroup.LayoutParams(-1, -2));
         choices.addView(zero, new RadioGroup.LayoutParams(-1, -2));
         choices.check(master_clear_selected == 0 ? zero.getId() : one.getId());
-        add(panel, choices, 8);
-        LinearLayout actions = row();
+        add(advanced, choices, 8);
+        add(panel, advanced, 4);
+        boolean stackedActions = getResources().getConfiguration().fontScale > 1.3f;
+        LinearLayout actions = stackedActions ? column() : row();
         Button cancel = new Button(this);
         cancel.setText(R.string.cancel_action);
-        cancel.setTextColor(TEXT);
+        cancel.setTextColor(colors.text);
         cancel.setAllCaps(false);
-        cancel.setBackground(ripple(0xFF23343B, 14));
+        cancel.setMinHeight(dp(48));
+        cancel.setStateListAnimator(null);
+        cancel.setElevation(0);
+        cancel.setBackground(ripple(colors.softGreen, 14));
         cancel.setOnClickListener(view -> dialog.dismiss());
-        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1));
+        actions.addView(cancel, stackedActions ? new LinearLayout.LayoutParams(-1, -2)
+                : new LinearLayout.LayoutParams(0, -2, 1));
         Button save = new Button(this);
         save.setText(R.string.save_action);
-        save.setTextColor(BG);
+        save.setTextColor(colors.onAccent);
         save.setAllCaps(false);
-        save.setBackground(ripple(MINT, 14));
+        save.setMinHeight(dp(48));
+        save.setStateListAnimator(null);
+        save.setElevation(0);
+        save.setBackground(ripple(colors.accent, 14));
         save.setOnClickListener(view -> {
             int seconds;
             try { seconds = Integer.parseInt(input.getText().toString().trim()); }
@@ -439,12 +549,14 @@ final class OptimizationScreen extends ContextThemeWrapper {
                     .putInt("master_clear", master_clear_selected).apply();
             dialog.dismiss();
         });
-        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(0, dp(48), 1);
-        saveLp.leftMargin = dp(12);
+        LinearLayout.LayoutParams saveLp = stackedActions ? new LinearLayout.LayoutParams(-1, -2)
+                : new LinearLayout.LayoutParams(0, -2, 1);
+        if (stackedActions) saveLp.topMargin = dp(12);
+        else saveLp.leftMargin = dp(12);
         actions.addView(save, saveLp);
         add(panel, actions, 24);
         ScrollView dialogScroll = new ScrollView(this);
-        dialogScroll.setBackground(shape(SURFACE, 24, 0));
+        dialogScroll.setBackground(shape(colors.surface, 24, 0));
         dialogScroll.addView(panel);
         dialog.setContentView(dialogScroll);
         dialog.setOnDismissListener(ignored -> settingsDialog = null);
@@ -463,12 +575,12 @@ final class OptimizationScreen extends ContextThemeWrapper {
     /** 設定起動の前に初期表示を準備。ここではアニメーションを開始しません。 */
     void prepareOptimization() {
         mode = OptimizationOrbView.RUNNING;
+        startedAt = 0;
         // 起動時に準備したオーバーレイにも、直前の選択・秒数を反映します。
         loadOptions();
         progressSeed = ThreadLocalRandom.current().nextLong();
         progress = new OptimizationProgress(animationDuration, progressSeed);
         renderState();
-        renderProgress(0);
     }
 
     /** WindowManager.addView() の直後に既存の最適化演出を開始します。 */
@@ -480,30 +592,50 @@ final class OptimizationScreen extends ContextThemeWrapper {
 
     private void renderState() {
         boolean running = mode == OptimizationOrbView.RUNNING;
+        boolean complete = mode == OptimizationOrbView.COMPLETE;
+        boolean overlay = closeRequest != null;
+        boolean failed = overlay && !running && !complete;
         rootView.setKeepScreenOn(running);
         scanChoices.check(scanMode == OptimizationEngine.SCAN_FULL
                 ? fullScanOption.getId() : quickScanOption.getId());
-        boolean canChooseScan = !running && closeRequest == null;
-        quickScanOption.setEnabled(canChooseScan);
-        fullScanOption.setEnabled(canChooseScan);
-        scanChoices.setAlpha(canChooseScan ? 1f : .65f);
+        updateScanSelection();
+        quickScanOption.setEnabled(!running && !overlay);
+        fullScanOption.setEnabled(!running && !overlay);
+        scanPanel.setVisibility(overlay ? View.GONE : View.VISIBLE);
+        progressPanel.setVisibility(overlay ? View.VISIBLE : View.GONE);
+        screenTitle.setText(overlay ? (failed ? R.string.scan_failed_title : complete ? R.string.scan_complete_title : R.string.scan_running_title)
+                : R.string.battery_title);
+        progressTitle.setText(failed ? R.string.scan_failed_title : complete ? R.string.optimization_complete : R.string.optimization_progress);
+        progressDescription.setText(failed ? R.string.optimization_failed : R.string.scan_complete_description);
+        progressDescription.setVisibility(running ? View.GONE : View.VISIBLE);
+        resultButton.setVisibility(running ? View.GONE : View.VISIBLE);
+        orb.setVisibility(failed ? View.GONE : View.VISIBLE);
         messageText.setVisibility(running ? View.VISIBLE : View.GONE);
         if (running) messageText.setText(R.string.keep_screen_open);
-        orb.setState(mode, mode == OptimizationOrbView.COMPLETE ? 1 : 0);
-        if (closeRequest != null && mode != OptimizationOrbView.RUNNING) {
-            orb.setClickable(false);
-            orb.setFocusable(false);
-            orb.setContentDescription(getString(mode == OptimizationOrbView.COMPLETE ?
-                    R.string.optimization_complete : R.string.optimize_action));
+        remainingTimeText.setVisibility(running ? View.VISIBLE : View.GONE);
+        if (running) {
+            long elapsed = startedAt == 0 ? 0 : SystemClock.elapsedRealtime() - startedAt;
+            renderProgress(progress.at(elapsed), elapsed);
+        } else {
+            orb.setState(mode, complete ? 1 : 0);
         }
-        // 未実行時は代わりのコピーを置かず、日時があるときだけ表示します。
-        lastRunText.setVisibility(lastRun == 0 || closeRequest != null ? View.GONE : View.VISIBLE);
-        if (lastRun != 0) lastRunText.setText(getString(R.string.last_run,
+        orb.setClickable(false);
+        orb.setFocusable(running);
+        startButton.setEnabled(!running);
+        lastRunText.setText(lastRun == 0 ? getString(R.string.last_run_empty) : getString(R.string.last_run,
                 DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.JAPAN).format(new Date(lastRun))));
     }
 
-    private void renderProgress(float fraction) {
+    private void renderProgress(float fraction, long elapsedMillis) {
         orb.setState(OptimizationOrbView.RUNNING, fraction);
+        long minutes = (progress.remainingSeconds(elapsedMillis) + 59) / 60;
+        if (minutes == displayedRemainingMinutes) return;
+        displayedRemainingMinutes = minutes;
+        if (minutes == 0) {
+            remainingTimeText.setText(R.string.scan_finishing);
+        } else {
+            remainingTimeText.setText(getString(R.string.scan_remaining_minutes, minutes));
+        }
     }
 
     /** 演出の終点。実処理は OptimizationEngine.performOptimization() に追加してください。 */
@@ -532,7 +664,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
                     optimizationJob = null;
                     mode = OptimizationOrbView.READY;
                     renderState();
-                    showMessage(getString(R.string.optimization_failed));
+                    if (closeRequest == null) showMessage(getString(R.string.optimization_failed));
                 });
             }
         });
@@ -540,19 +672,26 @@ final class OptimizationScreen extends ContextThemeWrapper {
 
     private void updateBattery(Intent intent) {
         if (intent == null) return;
+        lastBatteryIntent = intent;
         int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
         int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
         int percent = level >= 0 && scale > 0 ? Math.round(level * 100f / scale) : -1;
-        batteryText.setText(percent < 0 ? "— %" : percent + " %");
+        String levelLabel = percent < 0 ? "— %" : percent + " %";
+        SpannableString levelText = new SpannableString(levelLabel);
+        levelText.setSpan(new RelativeSizeSpan(.42f), levelLabel.length() - 1, levelLabel.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        batteryText.setText(levelText);
         batteryText.setContentDescription(percent < 0 ? "バッテリー残量を取得できません" : "バッテリー残量 " + percent + "パーセント");
         int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN);
         boolean charging = status == BatteryManager.BATTERY_STATUS_CHARGING;
         boolean full = status == BatteryManager.BATTERY_STATUS_FULL;
-        batteryCaption.setVisibility(charging || full ? View.VISIBLE : View.GONE);
-        if (charging || full) batteryCaption.setText(charging ? R.string.battery_charging : R.string.battery_full);
+        batteryCaption.setText(charging ? R.string.battery_charging : full ? R.string.battery_full
+                : status == BatteryManager.BATTERY_STATUS_DISCHARGING ? R.string.battery_discharging
+                : status == BatteryManager.BATTERY_STATUS_NOT_CHARGING ? R.string.battery_not_charging
+                : R.string.battery_status_unknown);
         for (int i = 0; i < batterySegments.length; i++) {
             boolean filled = percent >= 0 && i < Math.round(percent / 5f);
-            batterySegments[i].setBackground(shape(filled ? (percent <= 20 ? 0xFFE9B873 : MINT) : 0xFF263B3D, 3, 0));
+            batterySegments[i].setBackground(shape(filled ? (percent <= 20 ? colors.lowBattery : colors.accent) : colors.border, 2, 0));
         }
         int temperature = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
         temperatureText.setText(temperature == Integer.MIN_VALUE ? "— °C" : String.format(Locale.JAPAN, "%.1f °C", temperature / 10f));
@@ -568,7 +707,9 @@ final class OptimizationScreen extends ContextThemeWrapper {
             default: healthLabel = "情報なし";
         }
         healthText.setText(healthLabel);
-        healthText.setTextColor(health == BatteryManager.BATTERY_HEALTH_GOOD ? MINT : TEXT);
+        boolean warning = health != BatteryManager.BATTERY_HEALTH_GOOD
+                && health != BatteryManager.BATTERY_HEALTH_UNKNOWN;
+        healthText.setTextColor(warning ? colors.warning : health == BatteryManager.BATTERY_HEALTH_GOOD ? colors.accent : colors.muted);
     }
 
     void startUpdates() {
@@ -599,6 +740,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
     }
 
     void release() {
+        preferences.unregisterOnSharedPreferenceChangeListener(appearanceListener);
         if (settingsDialog != null) settingsDialog.dismiss();
         rootView.setKeepScreenOn(false);
         stopUpdates();
@@ -634,7 +776,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         return drawable;
     }
     private android.graphics.drawable.RippleDrawable ripple(int color, int radius) {
-        return new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x3372E8BD),
+        return new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(colors.ripple),
                 shape(color, radius, 0), shape(Color.WHITE, radius, 0));
     }
 }

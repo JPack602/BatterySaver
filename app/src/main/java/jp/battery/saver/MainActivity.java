@@ -7,6 +7,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -15,6 +17,8 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Toast;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 public final class MainActivity extends Activity {
     private static final int OVERLAY_PERMISSION_REQUEST = 100;
@@ -23,22 +27,35 @@ public final class MainActivity extends Activity {
     private AlertDialog overlayConsentDialog;
     private String messageAfterResume;
     private OptimizationOverlayService overlayService;
-    private boolean bound, resumed, launchPending, waitingForPermission, settingsLaunched;
+    private boolean bound, resumed, launchPending, waitingForPermission;
     private boolean overlayConsentPending, optimizeAfterPermission;
+    private OnBackInvokedCallback overlayBackCallback;
+    private SharedPreferences appearancePreferences;
+    private final SharedPreferences.OnSharedPreferenceChangeListener appearanceListener = (prefs, key) -> {
+        if (AppAppearance.DARK_MODE.equals(key)) {
+            setTheme(AppAppearance.theme(this));
+            configureWindow();
+        }
+    };
 
     private final ServiceConnection overlayConnection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
             overlayService = ((OptimizationOverlayService.LocalBinder) binder).getService();
+            overlayService.setOverlayStateListener(MainActivity.this::updateOverlayBackCallback);
             launchWhenReady();
         }
 
         @Override public void onServiceDisconnected(ComponentName name) {
             overlayService = null;
+            updateOverlayBackCallback();
         }
     };
 
     @Override public void onCreate(Bundle state) {
+        setTheme(AppAppearance.theme(this));
         super.onCreate(state);
+        appearancePreferences = AppAppearance.preferences(this);
+        appearancePreferences.registerOnSharedPreferenceChangeListener(appearanceListener);
         if (state != null) {
             waitingForPermission = state.getBoolean("waitingForPermission");
             overlayConsentPending = state.getBoolean("overlayConsentPending");
@@ -57,11 +74,19 @@ public final class MainActivity extends Activity {
     }
 
     private void configureWindow() {
+        AppAppearance.Palette colors = AppAppearance.palette(this);
         Window window = getWindow();
-        window.setStatusBarColor(0xFF0B1419);
-        window.setNavigationBarColor(0xFF0B1419);
-        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        window.setBackgroundDrawable(new ColorDrawable(colors.background));
+        window.setStatusBarColor(colors.background);
+        window.setNavigationBarColor(android.os.Build.VERSION.SDK_INT >= 27 || colors.dark
+                ? colors.background : 0xFF17251E);
+        int systemUi = View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+        if (!colors.dark) {
+            systemUi |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (android.os.Build.VERSION.SDK_INT >= 27) systemUi |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
+        window.getDecorView().setSystemUiVisibility(systemUi);
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             window.setNavigationBarContrastEnforced(false);
             window.setStatusBarContrastEnforced(false);
@@ -75,7 +100,8 @@ public final class MainActivity extends Activity {
     }
 
     private void requestOptimization() {
-        if (launchPending || waitingForPermission || settingsLaunched || overlayConsentPending) return;
+        if (launchPending || waitingForPermission || overlayConsentPending
+                || (overlayService != null && overlayService.isOverlayShowing())) return;
         if (!Settings.canDrawOverlays(this)) {
             optimizeAfterPermission = true;
             overlayConsentPending = true;
@@ -140,21 +166,22 @@ public final class MainActivity extends Activity {
         }
         try {
             overlayService.prepareOverlay();
-            settingsLaunched = true;
 
+            // ---------------------------------------------------------------
+            //                        Activityを起動
+            // ---------------------------------------------------------------
             // 【起動箇所】android.settings.SETTINGS を起動します。
             // startActivity の復帰は相手 Activity の初回描画完了を意味しません。
-            // ここでActivity起動するためのコードを書く
             startActivity(new Intent(Settings.ACTION_SETTINGS));
 
             // 選択した master_clear を出力
             // Toast.makeText(OptimizationScreen.master_clear_selected).show();
+            // ---------------------------------------------------------------
 
             // 【表示箇所】遅延・post・Service 起動待ちを挟まず、直後に addView します。
             overlayService.showPreparedOverlay();
         } catch (ActivityNotFoundException | IllegalStateException | SecurityException |
                  WindowManager.BadTokenException | WindowManager.InvalidDisplayException error) {
-            settingsLaunched = false;
             overlayService.hideOverlay();
             screen.showMessage(getString(R.string.overlay_failed));
             Toast.makeText(this, R.string.overlay_failed, Toast.LENGTH_LONG).show();
@@ -179,7 +206,6 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         resumed = true;
-        settingsLaunched = false;
         if (overlayService != null) {
             overlayService.hideOverlay();
             overlayService.prepareOverlay();
@@ -195,7 +221,41 @@ public final class MainActivity extends Activity {
 
     @Override protected void onPause() {
         resumed = false;
+        updateOverlayBackCallback();
         super.onPause();
+    }
+
+    private void dismissOptimization() {
+        if (overlayService != null) overlayService.hideOverlay();
+        screen.refreshLastRun();
+    }
+
+    /** オーバーレイ表示中だけ戻る操作を受け取り、通常画面の戻る動作を維持します。 */
+    private void updateOverlayBackCallback() {
+        if (resumed && overlayService != null && !overlayService.isOverlayShowing()) {
+            screen.refreshLastRun();
+        }
+        if (android.os.Build.VERSION.SDK_INT < 33) return;
+        boolean handleBack = resumed && overlayService != null && overlayService.isOverlayShowing();
+        if (handleBack && overlayBackCallback == null) {
+            overlayBackCallback = this::dismissOptimization;
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, overlayBackCallback);
+        } else if (!handleBack && overlayBackCallback != null) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(overlayBackCallback);
+            overlayBackCallback = null;
+        }
+    }
+
+    // Android 13以降は上のOnBackInvokedCallback、Android 12以前だけ従来APIで処理します。
+    @android.annotation.SuppressLint("GestureBackNavigation")
+    @SuppressWarnings("deprecation")
+    @Override public void onBackPressed() {
+        if (overlayService != null && overlayService.isOverlayShowing()) {
+            dismissOptimization();
+        } else {
+            super.onBackPressed();
+        }
     }
 
     @Override protected void onStop() {
@@ -211,6 +271,10 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        appearancePreferences.unregisterOnSharedPreferenceChangeListener(appearanceListener);
+        resumed = false;
+        updateOverlayBackCallback();
+        if (overlayService != null) overlayService.setOverlayStateListener(null);
         if (overlayConsentDialog != null) overlayConsentDialog.dismiss();
         screen.release();
         if (bound) {
