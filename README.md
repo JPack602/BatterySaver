@@ -1,12 +1,13 @@
 # CellBoost
 
 Javaで実装したAndroid向けバッテリー最適化アプリです。
-ネイビーとミントグリーンの画面に、円形の最適化ボタン、進捗リング、完了チェックを配置しています。
+明るいグレーと深い緑を基調に、残量・充電状態・温度・バッテリーの状態をまとめて表示します。
+スキャンはモードを選んで「スキャンを開始」から実行します。進捗画面にはリング、完了画面にはチェックと「設定画面に戻る」を表示します。
 icon/lightning-svgrepo-com.svgをAndroid用VectorDrawableに変換し、黒背景の中央に配置したアプリアイコンを使用しています。雷は従来より17%小さくし、中央を軸に右へ16度傾けています。アプリ内のブランドアイコンにも同じ調整を適用しています。
 
 ## Android Studioで開く
 
-1. Android Studioの「Open」で、このREADMEがあるBatterySaverフォルダーを選びます。
+1. Android Studioの「Open」で、このREADMEがあるCellBoostフォルダーを選びます。
 2. Gradle Syncが終わるまで待ちます。Gradle JDKは17以上を使用してください。
 3. エミュレーターまたはAndroid端末を選び、Runを押します。
 
@@ -42,8 +43,8 @@ Settings > Build, Execution, Deployment > Build Tools > Gradle のGradle user ho
 
 ## 診断モード
 
-バッテリー情報カードの下に「診断モード」カードを表示します。
-「クイックスキャン（主な項目を短時間で確認）」と「フルスキャン（すべての項目を詳しく確認）」を
+バッテリー情報カードの下にスキャンのモード選択を表示します。
+「クイックスキャン」と「フルスキャン」を
 ラジオボタンで選択できます。初期値はクイックスキャンで、選択はすぐに保存し、再起動後も維持します。
 実行中と結果表示のオーバーレイでは選択を変更できません。画面回転でも実行時の選択を復元します。
 選択値は `OptimizationEngine.performOptimization(Context context, int master_clear, int scanMode)` へ渡します。
@@ -51,8 +52,8 @@ Settings > Build, Execution, Deployment > Build Tools > Gradle のGradle user ho
 
 ## 設定と最適化時間
 
-右上の歯車ボタンから設定ポップアップを開き、最適化時間とマスタークリアの値をまとめて設定できます。
-「master_clear = 1 / マスタークリアの値は1です」「master_clear = 0 / マスタークリアの値は0です」の
+右上の歯車ボタンから設定ポップアップを開き、スキャン時間を設定できます。
+「詳細設定」を開くとマスタークリアの「有効」（1）・「無効」（0）を設定できます。
 ラジオボタンで選択し、「保存」を押すと `OptimizationScreen.master_clear_selected` に `0` または `1` を格納します。
 初期値は `1` です。既に保存されている値がある場合は、その値を維持します。
 選択値は `OptimizationEngine.performOptimization(Context context, int master_clear, int scanMode)` へ渡します。
@@ -72,7 +73,7 @@ Androidのアニメーション倍率設定によって指定秒数を短縮す�
 指定時間を過ぎて実処理を待っている間は「最終処理中…」と表示します。
 最適化中は「この画面を閉じないでください」を16spの明るい文字で表示し、画面の自動消灯を抑制します。
 案内文に背景や枠は付けません。
-縦画面ではバッテリー情報・診断モード・最適化ボタンを上から一定の間隔で並べ、高さが不足する場合はスクロールできます。
+縦画面ではバッテリー情報・診断モード・開始ボタンを上から一定の間隔で並べ、高さが不足する場合はスクロールできます。
 実処理を後から追加して長時間実行する場合は、従来どおり100%の状態で実処理の終了を待ちます。
 
 ## 実際の最適化処理を追加する
@@ -84,7 +85,7 @@ Androidのアニメーション倍率設定によって指定秒数を短縮す�
 `performOptimization(Context context, int master_clear, int scanMode)` の `TODO` コメントの位置にコードを追加してください。
 日本語で実行順序、スレッド、権限、エラー処理の注意を記載しています。
 
-呼び出し順序は、中央ボタン → 設定画面起動 → オーバーレイ内の指定秒数の進捗アニメーション → `performOptimization()` → 完了画面です。
+呼び出し順序は、「スキャンを開始」 → 設定画面起動 → オーバーレイ内の指定秒数の進捗アニメーション → `performOptimization()` → 完了画面です。
 実処理の実行中は100%の状態で待機し、正常終了後に完了表示へ進みます。
 例外が発生した場合は再試行できる状態へ戻ります。
 バックグラウンドスレッドで呼び出すため、Viewの更新や権限ダイアログの表示を直接行わないでください。
@@ -107,7 +108,7 @@ Androidで使用するVectorDrawableは `app/src/main/res/drawable` に配置し
 - MainActivity.java: オーバーレイ権限取得、設定画面の起動、Serviceへの事前接続
 - OptimizationOverlayService.java: オーバーレイの追加・削除と画面回転への対応
 - OptimizationScreen.java: 通常画面とオーバーレイで共有する画面・バッテリー情報・最適化演出
-- `OptimizationOrbView.java`: 中央ボタン、進捗リング、完了チェック
+- `OptimizationOrbView.java`: 進捗リング、完了チェック
 - `OptimizationProgress.java`: 指定時間で100%になるランダムな進捗カーブ
 - `OptimizationEngine.java`: 演出後に実行する処理の追加先
 - `res/drawable/ic_battery_brand.xml`: icon/lightning-svgrepo-com.svgから変換したブランドアイコン
@@ -158,3 +159,11 @@ ServiceはMainActivityとのbindで保持します。Activityの停止中も動�
 オーバーレイを閉じたとき・アプリへ戻ったとき・Service終了時にはView、Receiver、実行中の処理を解放します。
 MainActivity自体が破棄された場合はbindも解放され、オーバーレイを終了します。
 バックグラウンドで無期限に常駐する仕組みにはしていません。
+
+## 画面デザイン
+
+- ホームは残量を大きく表示し、Androidから取得した充電状態・温度・バッテリーの状態を同じカードにまとめています。「良好」はAndroidの状態フラグで、劣化率や実容量ではありません。
+- 選択したモードは緑の背景とラジオボタンで示します。未実装の診断結果・節約量・改善率は表示しません。
+- 設定の内部値は詳細設定にまとめ、通常の画面では変数名を表示しません。保存済みのキーと値、実処理への受け渡しは維持しています。
+- 幅640dp以上は2列、それより狭い画面は1列です。文字サイズを大きくした場合は縦に伸び、画面全体をスクロールできます。
+- 参考: [AccuBattery](https://play.google.com/store/apps/details?id=com.digibites.accubattery) / [Battery Guru](https://play.google.com/store/apps/details?id=com.paget96.batteryguru)。実測値を中心に見せる構成を参考にし、画像やブランド素材は流用していません。

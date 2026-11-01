@@ -1,46 +1,59 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name" translatable="false">CellBoost</string>
     <string name="overlay_permission_prompt">%1$s の「他のアプリの上に表示」を許可して戻ってください。</string>
-    <string name="overlay_consent_title">画面の表示に関するお願い</string>
-    <string name="overlay_consent_message">CellBoostでは、端末の設定画面を開いている間も進捗や完了を確認できるよう、設定画面の上にCellBoostの画面を表示します。\n\nこの機能を使うには、Androidの設定で「他のアプリの上に表示」を許可する必要があります。表示中の画面は、右上の「閉じる」から閉じられます。\n\nこの表示方法に同意して設定に進みますか？ あとでスキャンを使うときに設定することもできます。</string>
-    <string name="overlay_consent_accept">同意して設定へ</string>
+    <string name="overlay_consent_title">スキャン中の画面表示について</string>
+    <string name="overlay_consent_message">スキャン中は、端末の設定画面の上に進捗を表示します。利用するには、Androidの「他のアプリの上に表示」を許可してください。\n\n表示は右上の「閉じる」で終了できます。設定はあとからでも行えます。</string>
+    <string name="overlay_consent_accept">同意して設定を開く</string>
     <string name="overlay_consent_later">あとで</string>
-    <string name="optimize_action">スキャン</string>
-    <string name="optimize_again">再実行</string>
+    <string name="optimize_action">スキャンを開始</string>
+    <string name="optimize_again">もう一度スキャン</string>
     <string name="complete_label">完了</string>
     <string name="optimization_started">スキャンを開始しました</string>
-    <string name="optimization_progress">スキャンの進捗</string>
+    <string name="optimization_progress">スキャンしています</string>
     <string name="scan_remaining_minutes">残り約%1$d分</string>
-    <string name="scan_finishing">最終処理中…</string>
+    <string name="scan_finishing">完了までお待ちください</string>
     <string name="optimization_complete">スキャンが完了しました</string>
-    <string name="optimization_failed">処理に失敗しました。もう一度お試しください。</string>
+    <string name="optimization_failed">スキャンを完了できませんでした。もう一度お試しください。</string>
     <string name="keep_screen_open">この画面を閉じないでください</string>
     <string name="optimization_duration">スキャン時間</string>
-    <string name="duration_help">プログレスバーが100%になるまでの秒数です。\n1〜3600秒で設定してください。</string>
+    <string name="duration_help">1〜3600秒の範囲で設定できます。</string>
     <string name="duration_range">1〜3600秒で設定してください</string>
-    <string name="duration_input">完了までの秒数</string>
+    <string name="duration_input">スキャン時間（秒）</string>
     <string name="save_action">保存</string>
     <string name="cancel_action">キャンセル</string>
     <string name="settings_action">設定</string>
     <string name="master_clear_label">マスタークリア</string>
-    <string name="master_clear_one">master_clear = 1\nマスタークリアの値は1です</string>
-    <string name="master_clear_zero">master_clear = 0\nマスタークリアの値は0です</string>
-    <string name="battery_level">バッテリー残量</string>
+    <string name="master_clear_one">有効</string>
+    <string name="master_clear_zero">無効</string>
+    <string name="battery_level">残量</string>
     <string name="battery_temperature">温度</string>
     <string name="battery_health">状態</string>
-    <string name="battery_health_good" translatable="false">Good</string>
-    <string name="diagnosis_mode">診断モード</string>
+    <string name="battery_health_good">良好</string>
+    <string name="diagnosis_mode">モードを選択</string>
     <string name="scan_quick">クイックスキャン</string>
-    <string name="scan_quick_description">主な項目を短時間で確認</string>
     <string name="scan_full">フルスキャン</string>
-    <string name="scan_full_description">すべての項目を詳しく確認</string>
     <string name="battery_charging">充電中</string>
     <string name="battery_full">充電完了</string>
-    <string name="last_run">前回の実行：%1$s</string>
+    <string name="last_run">前回のスキャン：%1$s</string>
     <string name="close_action">閉じる</string>
-    <string name="close_description">閉じて設定画面に戻る</string>
+    <string name="close_description">スキャン画面を閉じて端末の設定に戻る</string>
     <string name="preparation_failed">準備に失敗しました。アプリを開き直してください。</string>
     <string name="overlay_permission_required">設定で「他のアプリの上に表示」を許可してください。</string>
     <string name="overlay_failed">画面を表示できませんでした。表示権限を確認してください。</string>
+    <string name="battery_title">バッテリー</string>
+    <string name="scan_heading">スキャン</string>
+    <string name="scan_help">開始すると、端末の設定画面が開きます。</string>
+    <string name="scan_running_title">スキャン中</string>
+    <string name="scan_complete_title">スキャン完了</string>
+    <string name="scan_failed_title">スキャンできませんでした</string>
+    <string name="scan_complete_description">画面を閉じて、端末の設定に戻れます。</string>
+    <string name="return_to_settings">設定画面に戻る</string>
+    <string name="last_run_empty">前回のスキャン：未実行</string>
+    <string name="battery_discharging">使用中</string>
+    <string name="battery_not_charging">充電停止中</string>
+    <string name="battery_status_unknown">状態を確認中</string>
+    <string name="seconds_unit">秒</string>
+    <string name="advanced_settings">詳細設定 ＋</string>
+    <string name="advanced_settings_open">詳細設定 −</string>
 </resources>

@@ -75,16 +75,23 @@ public final class OptimizationOverlayService extends Service {
     }
 
     private WindowManager.LayoutParams overlayParameters() {
+        int flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+        if (android.os.Build.VERSION.SDK_INT < 30) {
+            // Android 10以前でも、内容側で安全領域を確保できるようにします。
+            flags |= WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR;
+        }
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                flags,
                 PixelFormat.OPAQUE);
         params.gravity = Gravity.TOP | Gravity.START;
         params.setTitle(getString(R.string.app_name));
         params.windowAnimations = 0;
         if (android.os.Build.VERSION.SDK_INT >= 30) {
-            params.setFitInsetsTypes(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            // 背景はシステムバーの背後まで描き、内容の余白は画面側で確保します。
+            params.setFitInsetsTypes(0);
         }
         if (android.os.Build.VERSION.SDK_INT >= 28) {
             params.layoutInDisplayCutoutMode =

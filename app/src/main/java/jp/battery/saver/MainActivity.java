@@ -63,10 +63,13 @@ public final class MainActivity extends Activity {
 
     private void configureWindow() {
         Window window = getWindow();
-        window.setStatusBarColor(0xFF0B1419);
-        window.setNavigationBarColor(0xFF0B1419);
-        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        window.setStatusBarColor(0xFFF4F6F3);
+        window.setNavigationBarColor(android.os.Build.VERSION.SDK_INT >= 27 ? 0xFFF4F6F3 : 0xFF17251E);
+        int systemUi = View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        if (android.os.Build.VERSION.SDK_INT >= 27) systemUi |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        window.getDecorView().setSystemUiVisibility(systemUi);
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             window.setNavigationBarContrastEnforced(false);
             window.setStatusBarContrastEnforced(false);
