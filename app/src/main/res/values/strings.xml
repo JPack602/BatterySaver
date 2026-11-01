@@ -37,7 +37,7 @@
     <string name="battery_full">充電完了</string>
     <string name="last_run">前回のスキャン：%1$s</string>
     <string name="close_action">閉じる</string>
-    <string name="close_description">スキャン画面を閉じて端末の設定に戻る</string>
+    <string name="close_description">スキャン画面を閉じてCellBoostのトップ画面に戻る</string>
     <string name="preparation_failed">準備に失敗しました。アプリを開き直してください。</string>
     <string name="overlay_permission_required">設定で「他のアプリの上に表示」を許可してください。</string>
     <string name="overlay_failed">画面を表示できませんでした。表示権限を確認してください。</string>
@@ -47,8 +47,8 @@
     <string name="scan_running_title">スキャン中</string>
     <string name="scan_complete_title">スキャン完了</string>
     <string name="scan_failed_title">スキャンできませんでした</string>
-    <string name="scan_complete_description">画面を閉じて、端末の設定に戻れます。</string>
-    <string name="return_to_settings">設定画面に戻る</string>
+    <string name="scan_complete_description">画面を閉じて、CellBoostのトップ画面に戻れます。</string>
+    <string name="return_to_home">トップ画面に戻る</string>
     <string name="last_run_empty">前回のスキャン：未実行</string>
     <string name="battery_discharging">使用中</string>
     <string name="battery_not_charging">充電停止中</string>

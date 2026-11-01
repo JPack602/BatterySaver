@@ -56,7 +56,7 @@ public final class OptimizationOverlayService extends Service {
 
     void prepareOverlay() {
         if (screen == null) {
-            screen = new OptimizationScreen(windowContext, null, null, this::hideOverlay);
+            screen = new OptimizationScreen(windowContext, null, null, this::closeOverlayAndReturnToApp);
         }
         screen.prepareOptimization();
     }
@@ -100,6 +100,17 @@ public final class OptimizationOverlayService extends Service {
         return params;
     }
 
+    /** 閉じる操作では、既存のトップ画面を再利用して前面へ戻します。 */
+    private void closeOverlayAndReturnToApp() {
+        if (!attached) return;
+        Intent intent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // ユーザー操作による画面復帰を、オーバーレイの表示中に要求します。
+        startActivity(intent);
+        hideOverlay();
+    }
+
     void hideOverlay() {
         if (screen == null) return;
         if (attached) {
@@ -118,7 +129,7 @@ public final class OptimizationOverlayService extends Service {
         screen.saveState(state);
         boolean wasAttached = attached;
         hideOverlay();
-        screen = new OptimizationScreen(windowContext, state, null, this::hideOverlay);
+        screen = new OptimizationScreen(windowContext, state, null, this::closeOverlayAndReturnToApp);
         if (wasAttached) {
             windowManager.addView(screen.getView(), overlayParameters());
             attached = true;

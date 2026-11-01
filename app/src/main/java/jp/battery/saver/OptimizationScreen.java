@@ -324,7 +324,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         progressDescription.setGravity(Gravity.CENTER);
         progressDescription.setLineSpacing(dp(4), 1);
         add(progressPanel, progressDescription, 8);
-        resultButton = actionButton(getString(R.string.return_to_settings), MINT, Color.WHITE);
+        resultButton = actionButton(getString(R.string.return_to_home), MINT, Color.WHITE);
         resultButton.setOnClickListener(v -> {
             if (closeRequest != null) closeRequest.run();
         });
