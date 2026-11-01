@@ -46,9 +46,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 final class OptimizationScreen extends ContextThemeWrapper {
-    private static final int BG = 0xFFF4F6F3, SURFACE = Color.WHITE;
-    private static final int TEXT = 0xFF17251E, MUTED = 0xFF637168, MINT = 0xFF246B4A;
-    private static final int BORDER = 0xFFDDE4DC, SOFT_GREEN = 0xFFE6F0E8;
+    private AppAppearance.Palette colors;
     private static final int DEFAULT_DURATION_SECONDS = 8;
     private static final int MAX_DURATION_SECONDS = 3600;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -74,6 +72,11 @@ final class OptimizationScreen extends ContextThemeWrapper {
     private boolean registered, foreground, destroyed;
     private SharedPreferences preferences;
     private View rootView;
+    private ScrollView screenScroll;
+    private Intent lastBatteryIntent;
+    private final SharedPreferences.OnSharedPreferenceChangeListener appearanceListener = (prefs, key) -> {
+        if (AppAppearance.DARK_MODE.equals(key) && !destroyed) refreshAppearance();
+    };
     private final Runnable optimizationRequest, closeRequest;
 
     private final BroadcastReceiver batteryReceiver = new BroadcastReceiver() {
@@ -92,10 +95,11 @@ final class OptimizationScreen extends ContextThemeWrapper {
     };
 
     OptimizationScreen(Context context, Bundle state, Runnable optimizationRequest, Runnable closeRequest) {
-        super(context, R.style.AppTheme);
+        super(context, AppAppearance.theme(context));
+        colors = AppAppearance.palette(context);
         this.optimizationRequest = optimizationRequest;
         this.closeRequest = closeRequest;
-        preferences = getSharedPreferences("battery_saver", MODE_PRIVATE);
+        preferences = AppAppearance.preferences(this);
         lastRun = preferences.getLong("last_optimization", 0);
         loadOptions();
         progressSeed = ThreadLocalRandom.current().nextLong();
@@ -112,6 +116,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         progress = new OptimizationProgress(animationDuration, progressSeed);
         buildScreen();
         renderState();
+        preferences.registerOnSharedPreferenceChangeListener(appearanceListener);
     }
 
     View getView() { return rootView; }
@@ -126,11 +131,30 @@ final class OptimizationScreen extends ContextThemeWrapper {
         renderState();
     }
 
+    private void refreshAppearance() {
+        colors = AppAppearance.palette(this);
+        setTheme(AppAppearance.theme(this));
+        int scrollY = screenScroll.getScrollY();
+        CharSequence message = messageText.getText();
+        boolean messageVisible = messageText.getVisibility() == View.VISIBLE;
+        // ルートと実行状態を維持し、進捗・実処理を再開始せずに表示だけを更新します。
+        buildScreen();
+        displayedRemainingMinutes = -1;
+        renderState();
+        updateBattery(lastBatteryIntent);
+        if (mode != OptimizationOrbView.RUNNING && messageVisible) showMessage(message.toString());
+        ScrollView restoredScroll = screenScroll;
+        restoredScroll.post(() -> restoredScroll.scrollTo(0, scrollY));
+    }
+
     private void buildScreen() {
         android.util.DisplayMetrics display = getResources().getDisplayMetrics();
         boolean landscape = display.widthPixels / display.density >= 640;
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(BG);
+        FrameLayout root = rootView == null ? new FrameLayout(this) : (FrameLayout) rootView;
+        root.removeAllViews();
+        // オーバーレイのシステムバーは背後の設定画面に従うため、
+        // 安全領域の背景だけは端末のライト／ダーク設定に合わせます。
+        root.setBackgroundColor(closeRequest == null ? colors.background : AppAppearance.systemBarBackground(this));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int left, top, right, bottom;
             if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -145,6 +169,8 @@ final class OptimizationScreen extends ContextThemeWrapper {
             return insets;
         });
         ScrollView scroll = new ScrollView(this);
+        screenScroll = scroll;
+        scroll.setBackgroundColor(colors.background);
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
@@ -172,27 +198,40 @@ final class OptimizationScreen extends ContextThemeWrapper {
         brand.setPadding(dp(5), dp(5), dp(5), dp(5));
         brand.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         header.addView(brand, lp(32, 32));
-        TextView brandText = text(getString(R.string.app_name), 19, TEXT, true);
+        TextView brandText = text(getString(R.string.app_name), 19, colors.text, true);
         LinearLayout.LayoutParams brandLp = new LinearLayout.LayoutParams(0, -2, 1);
         brandLp.leftMargin = dp(10);
         header.addView(brandText, brandLp);
+        ImageButton appearance = new ImageButton(this);
+        appearance.setImageResource(colors.dark ? R.drawable.ic_sun : R.drawable.ic_moon);
+        appearance.setImageTintList(ColorStateList.valueOf(colors.text));
+        appearance.setPadding(dp(13), dp(13), dp(13), dp(13));
+        appearance.setBackground(ripple(colors.background, 24));
+        String appearanceAction = getString(colors.dark ? R.string.switch_to_light_mode : R.string.switch_to_dark_mode);
+        appearance.setContentDescription(appearanceAction);
+        appearance.setTooltipText(appearanceAction);
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            appearance.setStateDescription(getString(colors.dark ? R.string.dark_mode : R.string.light_mode));
+        }
+        appearance.setOnClickListener(v -> AppAppearance.toggle(this));
+        header.addView(appearance, lp(48, 48));
         if (closeRequest == null) {
             ImageButton settings = new ImageButton(this);
             settings.setImageResource(R.drawable.ic_settings);
-            settings.setImageTintList(ColorStateList.valueOf(TEXT));
+            settings.setImageTintList(ColorStateList.valueOf(colors.text));
             settings.setPadding(dp(13), dp(13), dp(13), dp(13));
-            settings.setBackground(ripple(BG, 24));
+            settings.setBackground(ripple(colors.background, 24));
             settings.setContentDescription(getString(R.string.settings_action));
             settings.setOnClickListener(v -> showSettingsDialog());
             header.addView(settings, lp(48, 48));
         } else {
-            Button close = actionButton(getString(R.string.close_action), SOFT_GREEN, MINT);
+            Button close = actionButton(getString(R.string.close_action), colors.softGreen, colors.accent);
             close.setContentDescription(getString(R.string.close_description));
             close.setOnClickListener(v -> closeRequest.run());
             header.addView(close, new LinearLayout.LayoutParams(-2, -2));
         }
         add(content, header, 0);
-        screenTitle = text(getString(R.string.battery_title), 28, TEXT, true);
+        screenTitle = text(getString(R.string.battery_title), 28, colors.text, true);
         screenTitle.setVisibility(landscape ? View.GONE : View.VISIBLE);
         if (android.os.Build.VERSION.SDK_INT >= 28) screenTitle.setAccessibilityHeading(true);
         add(content, screenTitle, 20);
@@ -217,18 +256,18 @@ final class OptimizationScreen extends ContextThemeWrapper {
         LinearLayout batteryCard = column();
         batteryCard.setPadding(dp(landscape ? 20 : 24), dp(landscape ? 18 : 22),
                 dp(landscape ? 20 : 24), dp(landscape ? 18 : 22));
-        batteryCard.setBackground(shape(SURFACE, 22, BORDER));
+        batteryCard.setBackground(shape(colors.surface, 22, colors.border));
         LinearLayout batteryTop = row();
         batteryTop.setGravity(Gravity.CENTER_VERTICAL);
-        TextView batteryLabel = text(getString(R.string.battery_level), 14, MUTED, false);
+        TextView batteryLabel = text(getString(R.string.battery_level), 14, colors.muted, false);
         batteryTop.addView(batteryLabel, new LinearLayout.LayoutParams(0, -2, 1));
-        batteryCaption = text("", 12, MINT, true);
+        batteryCaption = text("", 12, colors.accent, true);
         batteryCaption.setGravity(Gravity.CENTER);
         batteryCaption.setPadding(dp(10), dp(6), dp(10), dp(6));
-        batteryCaption.setBackground(shape(SOFT_GREEN, 20, 0));
+        batteryCaption.setBackground(shape(colors.softGreen, 20, 0));
         batteryTop.addView(batteryCaption);
         batteryCard.addView(batteryTop);
-        batteryText = text("— %", 68, TEXT, true);
+        batteryText = text("— %", 68, colors.text, true);
         batteryText.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
         batteryText.setMaxLines(1);
         batteryText.setAutoSizeTextTypeUniformWithConfiguration(32, landscape ? 48 : 68, 1,
@@ -238,7 +277,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         segments.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         for (int i = 0; i < batterySegments.length; i++) {
             View segment = new View(this);
-            segment.setBackground(shape(BORDER, 2, 0));
+            segment.setBackground(shape(colors.border, 2, 0));
             LinearLayout.LayoutParams segmentLp = new LinearLayout.LayoutParams(0, dp(8), 1);
             if (i > 0) segmentLp.leftMargin = dp(3);
             segments.addView(segment, segmentLp);
@@ -250,10 +289,10 @@ final class OptimizationScreen extends ContextThemeWrapper {
         batteryCard.addView(divider(), dividerLp);
         LinearLayout details = row();
         LinearLayout temp = metric(getString(R.string.battery_temperature));
-        temperatureText = text("— °C", 21, TEXT, true);
+        temperatureText = text("— °C", 21, colors.text, true);
         temp.addView(temperatureText);
         LinearLayout health = metric(getString(R.string.battery_health));
-        healthText = text("—", 21, TEXT, true);
+        healthText = text("—", 21, colors.text, true);
         health.addView(healthText);
         LinearLayout.LayoutParams tempLp = new LinearLayout.LayoutParams(0, -2, 1);
         tempLp.rightMargin = dp(12);
@@ -263,15 +302,15 @@ final class OptimizationScreen extends ContextThemeWrapper {
         overview.addView(batteryCard, new LinearLayout.LayoutParams(-1, -2));
 
         scanPanel = column();
-        TextView scanHeading = text(getString(R.string.scan_heading), 20, TEXT, true);
+        TextView scanHeading = text(getString(R.string.scan_heading), 20, colors.text, true);
         if (android.os.Build.VERSION.SDK_INT >= 28) scanHeading.setAccessibilityHeading(true);
         scanPanel.addView(scanHeading);
-        TextView modeLabel = text(getString(R.string.diagnosis_mode), 13, MUTED, false);
+        TextView modeLabel = text(getString(R.string.diagnosis_mode), 13, colors.muted, false);
         add(scanPanel, modeLabel, landscape ? 8 : 16);
         scanChoices = new RadioGroup(this);
         scanChoices.setOrientation(LinearLayout.VERTICAL);
         scanChoices.setPadding(dp(4), dp(4), dp(4), dp(4));
-        scanChoices.setBackground(shape(SURFACE, 18, BORDER));
+        scanChoices.setBackground(shape(colors.surface, 18, colors.border));
         quickScanOption = scanOption(R.string.scan_quick, landscape);
         fullScanOption = scanOption(R.string.scan_full, landscape);
         scanChoices.addView(quickScanOption, new RadioGroup.LayoutParams(-1, -2));
@@ -289,17 +328,17 @@ final class OptimizationScreen extends ContextThemeWrapper {
         });
         add(scanPanel, scanChoices, 10);
         updateScanSelection();
-        TextView scanHelp = text(getString(R.string.scan_help), 13, MUTED, false);
+        TextView scanHelp = text(getString(R.string.scan_help), 13, colors.muted, false);
         scanHelp.setLineSpacing(dp(3), 1);
         add(scanPanel, scanHelp, landscape ? 10 : 14);
-        startButton = actionButton(getString(R.string.optimize_action), MINT, Color.WHITE);
+        startButton = actionButton(getString(R.string.optimize_action), colors.accent, colors.onAccent);
         startButton.setOnClickListener(v -> {
             if (optimizationRequest != null) optimizationRequest.run();
         });
         LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, -2);
         startLp.topMargin = dp(landscape ? 12 : 20);
         scanPanel.addView(startButton, startLp);
-        lastRunText = text("", 12, MUTED, false);
+        lastRunText = text("", 12, colors.muted, false);
         lastRunText.setGravity(Gravity.CENTER);
         lastRunText.setLineSpacing(dp(3), 1);
         add(scanPanel, lastRunText, landscape ? 10 : 14);
@@ -308,8 +347,8 @@ final class OptimizationScreen extends ContextThemeWrapper {
         progressPanel = column();
         progressPanel.setGravity(Gravity.CENTER_HORIZONTAL);
         progressPanel.setPadding(dp(20), dp(20), dp(20), dp(24));
-        progressPanel.setBackground(shape(SURFACE, 22, BORDER));
-        progressTitle = text("", 20, TEXT, true);
+        progressPanel.setBackground(shape(colors.surface, 22, colors.border));
+        progressTitle = text("", 20, colors.text, true);
         progressTitle.setGravity(Gravity.CENTER);
         progressTitle.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         progressPanel.addView(progressTitle);
@@ -317,14 +356,14 @@ final class OptimizationScreen extends ContextThemeWrapper {
         orb.setRepeatEnabled(false);
         orb.setId(View.generateViewId());
         progressPanel.addView(orb, new LinearLayout.LayoutParams(-1, dp(landscape ? 160 : 200)));
-        remainingTimeText = text("", 14, MINT, true);
+        remainingTimeText = text("", 14, colors.accent, true);
         remainingTimeText.setGravity(Gravity.CENTER);
         add(progressPanel, remainingTimeText, 0);
-        progressDescription = text(getString(R.string.scan_complete_description), 14, MUTED, false);
+        progressDescription = text(getString(R.string.scan_complete_description), 14, colors.muted, false);
         progressDescription.setGravity(Gravity.CENTER);
         progressDescription.setLineSpacing(dp(4), 1);
         add(progressPanel, progressDescription, 8);
-        resultButton = actionButton(getString(R.string.return_to_home), MINT, Color.WHITE);
+        resultButton = actionButton(getString(R.string.return_to_home), colors.accent, colors.onAccent);
         resultButton.setOnClickListener(v -> {
             if (closeRequest != null) closeRequest.run();
         });
@@ -333,7 +372,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         progressPanel.addView(resultButton, resultLp);
         actions.addView(progressPanel, new LinearLayout.LayoutParams(-1, -2));
 
-        messageText = text("", 16, TEXT, false);
+        messageText = text("", 16, colors.text, false);
         messageText.setGravity(Gravity.CENTER);
         messageText.setLineSpacing(dp(5), 1);
         messageText.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -345,7 +384,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
 
     private View divider() {
         View line = new View(this);
-        line.setBackgroundColor(BORDER);
+        line.setBackgroundColor(colors.border);
         line.setMinimumHeight(dp(1));
         return line;
     }
@@ -367,15 +406,15 @@ final class OptimizationScreen extends ContextThemeWrapper {
 
     private void updateScanSelection() {
         boolean quick = scanMode == OptimizationEngine.SCAN_QUICK;
-        quickScanOption.setBackground(ripple(quick ? SOFT_GREEN : SURFACE, 14));
-        fullScanOption.setBackground(ripple(quick ? SURFACE : SOFT_GREEN, 14));
+        quickScanOption.setBackground(ripple(quick ? colors.softGreen : colors.surface, 14));
+        fullScanOption.setBackground(ripple(quick ? colors.surface : colors.softGreen, 14));
         quickScanOption.setTypeface(Typeface.create(quick ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
         fullScanOption.setTypeface(Typeface.create(quick ? "sans-serif" : "sans-serif-medium", Typeface.NORMAL));
     }
 
     private LinearLayout metric(String label) {
         LinearLayout card = column();
-        TextView caption = text(label, 12, MUTED, false);
+        TextView caption = text(label, 12, colors.muted, false);
         caption.setPadding(0, 0, 0, dp(6));
         card.addView(caption);
         return card;
@@ -386,13 +425,13 @@ final class OptimizationScreen extends ContextThemeWrapper {
         option.setId(View.generateViewId());
         option.setText(titleRes);
         option.setTextSize(15);
-        option.setTextColor(TEXT);
+        option.setTextColor(colors.text);
         option.setIncludeFontPadding(false);
         option.setGravity(Gravity.CENTER_VERTICAL);
         option.setMinHeight(dp(compact ? 48 : 56));
         option.setPadding(dp(12), dp(compact ? 8 : 12), dp(12), dp(compact ? 8 : 12));
         option.setButtonTintList(new ColorStateList(new int[][]{
-                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{MINT, MUTED}));
+                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{colors.accent, colors.muted}));
         return option;
     }
 
@@ -410,9 +449,9 @@ final class OptimizationScreen extends ContextThemeWrapper {
         option.setId(View.generateViewId());
         option.setText(label);
         option.setTextSize(14);
-        option.setTextColor(TEXT);
+        option.setTextColor(colors.text);
         option.setButtonTintList(new ColorStateList(new int[][]{
-                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{MINT, MUTED}));
+                new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{colors.accent, colors.muted}));
         option.setMinHeight(dp(48));
         option.setLineSpacing(dp(4), 1);
         option.setPadding(0, dp(8), dp(4), dp(8));
@@ -426,36 +465,36 @@ final class OptimizationScreen extends ContextThemeWrapper {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout panel = column();
         panel.setPadding(dp(24), dp(24), dp(24), dp(20));
-        panel.setBackground(shape(SURFACE, 24, BORDER));
-        panel.addView(text(getString(R.string.settings_action), 20, TEXT, true));
-        add(panel, text(getString(R.string.optimization_duration), 14, TEXT, true), 24);
-        TextView durationHelp = text(getString(R.string.duration_help), 13, MUTED, false);
+        panel.setBackground(shape(colors.surface, 24, colors.border));
+        panel.addView(text(getString(R.string.settings_action), 20, colors.text, true));
+        add(panel, text(getString(R.string.optimization_duration), 14, colors.text, true), 24);
+        TextView durationHelp = text(getString(R.string.duration_help), 13, colors.muted, false);
         durationHelp.setLineSpacing(dp(4), 1);
         add(panel, durationHelp, 8);
         EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
         input.setSingleLine(true);
-        input.setTextColor(TEXT);
+        input.setTextColor(colors.text);
         input.setTextSize(24);
         input.setMinHeight(dp(56));
-        input.setBackgroundTintList(ColorStateList.valueOf(MINT));
+        input.setBackgroundTintList(ColorStateList.valueOf(colors.accent));
         input.setContentDescription(getString(R.string.duration_input));
         input.setText(String.valueOf(animationDuration / 1000));
         input.selectAll();
         LinearLayout durationRow = row();
         durationRow.setGravity(Gravity.CENTER_VERTICAL);
         durationRow.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView secondsUnit = text(getString(R.string.seconds_unit), 15, MUTED, false);
+        TextView secondsUnit = text(getString(R.string.seconds_unit), 15, colors.muted, false);
         secondsUnit.setPadding(dp(12), 0, 0, 0);
         durationRow.addView(secondsUnit);
         add(panel, durationRow, 12);
-        Button advancedToggle = actionButton(getString(R.string.advanced_settings), SURFACE, MINT);
+        Button advancedToggle = actionButton(getString(R.string.advanced_settings), colors.surface, colors.accent);
         advancedToggle.setTextSize(14);
         advancedToggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         advancedToggle.setPadding(0, dp(12), 0, dp(12));
         advancedToggle.setMinHeight(dp(48));
-        advancedToggle.setBackground(ripple(SURFACE, 10));
+        advancedToggle.setBackground(ripple(colors.surface, 10));
         advancedToggle.setFocusable(true);
         add(panel, advancedToggle, 16);
         LinearLayout advanced = column();
@@ -465,7 +504,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
             advanced.setVisibility(expanded ? View.GONE : View.VISIBLE);
             advancedToggle.setText(expanded ? R.string.advanced_settings : R.string.advanced_settings_open);
         });
-        advanced.addView(text(getString(R.string.master_clear_label), 14, TEXT, true));
+        advanced.addView(text(getString(R.string.master_clear_label), 14, colors.text, true));
         RadioGroup choices = new RadioGroup(this);
         choices.setOrientation(LinearLayout.VERTICAL);
         RadioButton one = masterClearOption(R.string.master_clear_one);
@@ -479,23 +518,23 @@ final class OptimizationScreen extends ContextThemeWrapper {
         LinearLayout actions = stackedActions ? column() : row();
         Button cancel = new Button(this);
         cancel.setText(R.string.cancel_action);
-        cancel.setTextColor(TEXT);
+        cancel.setTextColor(colors.text);
         cancel.setAllCaps(false);
         cancel.setMinHeight(dp(48));
         cancel.setStateListAnimator(null);
         cancel.setElevation(0);
-        cancel.setBackground(ripple(SOFT_GREEN, 14));
+        cancel.setBackground(ripple(colors.softGreen, 14));
         cancel.setOnClickListener(view -> dialog.dismiss());
         actions.addView(cancel, stackedActions ? new LinearLayout.LayoutParams(-1, -2)
                 : new LinearLayout.LayoutParams(0, -2, 1));
         Button save = new Button(this);
         save.setText(R.string.save_action);
-        save.setTextColor(Color.WHITE);
+        save.setTextColor(colors.onAccent);
         save.setAllCaps(false);
         save.setMinHeight(dp(48));
         save.setStateListAnimator(null);
         save.setElevation(0);
-        save.setBackground(ripple(MINT, 14));
+        save.setBackground(ripple(colors.accent, 14));
         save.setOnClickListener(view -> {
             int seconds;
             try { seconds = Integer.parseInt(input.getText().toString().trim()); }
@@ -517,7 +556,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         actions.addView(save, saveLp);
         add(panel, actions, 24);
         ScrollView dialogScroll = new ScrollView(this);
-        dialogScroll.setBackground(shape(SURFACE, 24, 0));
+        dialogScroll.setBackground(shape(colors.surface, 24, 0));
         dialogScroll.addView(panel);
         dialog.setContentView(dialogScroll);
         dialog.setOnDismissListener(ignored -> settingsDialog = null);
@@ -633,6 +672,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
 
     private void updateBattery(Intent intent) {
         if (intent == null) return;
+        lastBatteryIntent = intent;
         int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
         int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
         int percent = level >= 0 && scale > 0 ? Math.round(level * 100f / scale) : -1;
@@ -651,7 +691,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
                 : R.string.battery_status_unknown);
         for (int i = 0; i < batterySegments.length; i++) {
             boolean filled = percent >= 0 && i < Math.round(percent / 5f);
-            batterySegments[i].setBackground(shape(filled ? (percent <= 20 ? 0xFFA56724 : MINT) : BORDER, 2, 0));
+            batterySegments[i].setBackground(shape(filled ? (percent <= 20 ? colors.lowBattery : colors.accent) : colors.border, 2, 0));
         }
         int temperature = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
         temperatureText.setText(temperature == Integer.MIN_VALUE ? "— °C" : String.format(Locale.JAPAN, "%.1f °C", temperature / 10f));
@@ -669,7 +709,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         healthText.setText(healthLabel);
         boolean warning = health != BatteryManager.BATTERY_HEALTH_GOOD
                 && health != BatteryManager.BATTERY_HEALTH_UNKNOWN;
-        healthText.setTextColor(warning ? 0xFF99531D : health == BatteryManager.BATTERY_HEALTH_GOOD ? MINT : MUTED);
+        healthText.setTextColor(warning ? colors.warning : health == BatteryManager.BATTERY_HEALTH_GOOD ? colors.accent : colors.muted);
     }
 
     void startUpdates() {
@@ -700,6 +740,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
     }
 
     void release() {
+        preferences.unregisterOnSharedPreferenceChangeListener(appearanceListener);
         if (settingsDialog != null) settingsDialog.dismiss();
         rootView.setKeepScreenOn(false);
         stopUpdates();
@@ -735,7 +776,7 @@ final class OptimizationScreen extends ContextThemeWrapper {
         return drawable;
     }
     private android.graphics.drawable.RippleDrawable ripple(int color, int radius) {
-        return new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22246B4A),
+        return new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(colors.ripple),
                 shape(color, radius, 0), shape(Color.WHITE, radius, 0));
     }
 }

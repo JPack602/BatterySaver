@@ -14,9 +14,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 /** スキャンの進捗と完了状態を、同じ位置に表示します。 */
 public final class OptimizationOrbView extends View {
     public static final int READY = 0, RUNNING = 1, COMPLETE = 2;
-    private static final int GREEN = 0xFF246B4A;
-    private static final int TEXT = 0xFF17251E;
-    private static final int SOFT_GREEN = 0xFFE6F0E8;
+    private final AppAppearance.Palette colors;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF bounds = new RectF(-112, -112, 112, 112);
     private final Path check = new Path();
@@ -30,8 +28,9 @@ public final class OptimizationOrbView extends View {
 
     public OptimizationOrbView(Context context) {
         super(context);
+        colors = AppAppearance.palette(context);
         optimizationBolt = context.getDrawable(R.drawable.ic_optimization_bolt);
-        optimizationBolt.setTint(GREEN);
+        optimizationBolt.setTint(colors.accent);
         optimizationBolt.setBounds(-22, -22, 22, 22);
         setClickable(true);
         setFocusable(true);
@@ -111,37 +110,37 @@ public final class OptimizationOrbView extends View {
         if (mode == RUNNING) {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(9);
-            paint.setColor(SOFT_GREEN);
+            paint.setColor(colors.softGreen);
             canvas.drawOval(bounds, paint);
             if (progress > 0) {
-                paint.setColor(GREEN);
+                paint.setColor(colors.accent);
                 canvas.drawArc(bounds, -90, 360 * progress, false, paint);
             }
-            drawText(canvas, progressPercent() + "%", 0, 48, TEXT, regular, 174, 76);
+            drawText(canvas, progressPercent() + "%", 0, 48, colors.text, regular, 174, 76);
         } else if (mode == COMPLETE) {
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(SOFT_GREEN);
+            paint.setColor(colors.softGreen);
             canvas.drawCircle(0, -18, 47, paint);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(5);
-            paint.setColor(GREEN);
+            paint.setColor(colors.accent);
             check.reset();
             check.moveTo(-18, -19);
             check.lineTo(-5, -6);
             check.lineTo(20, -32);
             canvas.drawPath(check, paint);
             drawText(canvas, getContext().getString(repeatEnabled ? R.string.optimize_again : R.string.complete_label),
-                    57, 21, TEXT, medium, 188, 32);
+                    57, 21, colors.text, medium, 188, 32);
         } else {
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(pressed ? 0xFFD4E7DA : SOFT_GREEN);
+            paint.setColor(pressed ? colors.pressedGreen : colors.softGreen);
             canvas.drawCircle(0, 0, 112, paint);
             canvas.save();
             canvas.translate(0, -26);
             optimizationBolt.draw(canvas);
             canvas.restore();
             drawText(canvas, getContext().getString(R.string.optimize_action),
-                    36, 21, GREEN, medium, 180, 36);
+                    36, 21, colors.accent, medium, 180, 36);
         }
         canvas.restore();
     }

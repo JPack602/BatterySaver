@@ -7,6 +7,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -28,6 +30,13 @@ public final class MainActivity extends Activity {
     private boolean bound, resumed, launchPending, waitingForPermission;
     private boolean overlayConsentPending, optimizeAfterPermission;
     private OnBackInvokedCallback overlayBackCallback;
+    private SharedPreferences appearancePreferences;
+    private final SharedPreferences.OnSharedPreferenceChangeListener appearanceListener = (prefs, key) -> {
+        if (AppAppearance.DARK_MODE.equals(key)) {
+            setTheme(AppAppearance.theme(this));
+            configureWindow();
+        }
+    };
 
     private final ServiceConnection overlayConnection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -43,7 +52,10 @@ public final class MainActivity extends Activity {
     };
 
     @Override public void onCreate(Bundle state) {
+        setTheme(AppAppearance.theme(this));
         super.onCreate(state);
+        appearancePreferences = AppAppearance.preferences(this);
+        appearancePreferences.registerOnSharedPreferenceChangeListener(appearanceListener);
         if (state != null) {
             waitingForPermission = state.getBoolean("waitingForPermission");
             overlayConsentPending = state.getBoolean("overlayConsentPending");
@@ -62,13 +74,18 @@ public final class MainActivity extends Activity {
     }
 
     private void configureWindow() {
+        AppAppearance.Palette colors = AppAppearance.palette(this);
         Window window = getWindow();
-        window.setStatusBarColor(0xFFF4F6F3);
-        window.setNavigationBarColor(android.os.Build.VERSION.SDK_INT >= 27 ? 0xFFF4F6F3 : 0xFF17251E);
+        window.setBackgroundDrawable(new ColorDrawable(colors.background));
+        window.setStatusBarColor(colors.background);
+        window.setNavigationBarColor(android.os.Build.VERSION.SDK_INT >= 27 || colors.dark
+                ? colors.background : 0xFF17251E);
         int systemUi = View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-        if (android.os.Build.VERSION.SDK_INT >= 27) systemUi |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+        if (!colors.dark) {
+            systemUi |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (android.os.Build.VERSION.SDK_INT >= 27) systemUi |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
         window.getDecorView().setSystemUiVisibility(systemUi);
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             window.setNavigationBarContrastEnforced(false);
@@ -254,6 +271,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        appearancePreferences.unregisterOnSharedPreferenceChangeListener(appearanceListener);
         resumed = false;
         updateOverlayBackCallback();
         if (overlayService != null) overlayService.setOverlayStateListener(null);
